@@ -1,0 +1,11 @@
+[package]
+name = "rondo"
+version = "0.1.0"
+edition = "2024"
+description = "Embedded round-robin time-series storage engine"
+license = "Apache-2.0"
+repository = "https://github.com/donaldgifford/rondo"
+keywords = ["time-series", "metrics", "embedded", "round-robin", "monitoring"]
+categories = ["database", "embedded"]
+
+[dependencies]
