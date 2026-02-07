@@ -22,5 +22,13 @@ target
 
 
 # Added by cargo
-
 /target
+
+# Extras
+*.swp
+*.swo
+.idea/
+.vscode/
+*.prof
+*.svg
+
