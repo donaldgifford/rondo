@@ -25,7 +25,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 
 ### Tasks
 
-- [ ] **1.1** Define core types in `rondo/src/schema.rs`: `SchemaConfig`, `TierConfig`, `ConsolidationFn`, `LabelMatcher`
+- [x] **1.1** Define core types in `rondo/src/schema.rs`: `SchemaConfig`, `TierConfig`, `ConsolidationFn`, `LabelMatcher`
 - [ ] **1.2** Implement slab file format in `rondo/src/slab.rs`
   - 64-byte header: magic bytes, version, schema hash, slot count, series count, interval_ns, write cursor
   - Series directory: fixed-size array mapping series ID → column offset

@@ -23,3 +23,6 @@
 //! - Host-level metrics with local retention and consolidated upstream export
 //! - Edge and IoT environments where running a full TSDB is disproportionate
 //! - Anywhere you need the SQLite of time-series storage
+
+pub mod error;
+pub mod schema;
