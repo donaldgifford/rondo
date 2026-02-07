@@ -1,11 +1,59 @@
-[package]
-name = "rondo"
-version = "0.0.1"
-edition = "2024"
-description = "Embedded round-robin time-series storage engine"
-license = "Apache-2.0"
-repository = "https://github.com/donaldgifford/rondo"
-keywords = ["time-series", "metrics", "embedded", "round-robin", "monitoring"]
-categories = ["database", "embedded"]
+[workspace]
+resolver = "2"
+members = ["rondo", "rondo-cli"]
 
-[dependencies]
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/donaldgifford/rondo"
+rust-version = "1.92"
+
+[workspace.lints.clippy]
+# Correctness
+correctness = { level = "deny", priority = -1 }
+
+
+# Performance — critical for this project
+perf = { level = "warn", priority = -1 }
+large_enum_variant = { level = "warn" }
+inefficient_to_string = { level = "warn" }
+
+# Style
+style = { level = "warn", priority = -1 }
+needless_return = { level = "allow" }         # sometimes explicit returns are clearer
+module_name_repetitions = { level = "allow" }
+
+# Pedantic (opt-in, useful ones)
+cast_possible_truncation = { level = "warn" }
+cast_sign_loss = { level = "warn" }
+cast_precision_loss = { level = "warn" }
+missing_errors_doc = { level = "warn" }
+missing_panics_doc = { level = "warn" }
+
+# Restriction (opt-in, safety-relevant)
+undocumented_unsafe_blocks = { level = "deny" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[workspace.dependencies]
+# Shared dependencies pinned at workspace level.
+# Individual crates inherit these with { workspace = true }.
+memmap2 = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# rust-vmm crates (for demo VMM, when needed)
+# kvm-ioctls = "0.19"
+# kvm-bindings = "0.10"
+# vm-memory = "0.16"
+# linux-loader = "0.12"
+# virtio-queue = "0.13"
+# event-manager = "0.4"
