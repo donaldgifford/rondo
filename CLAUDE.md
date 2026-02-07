@@ -31,6 +31,10 @@ cargo bench -p rondo -- record
 # Coverage
 cargo llvm-cov --workspace --lcov --output-path lcov.info
 
+# Changelog (generate from conventional commits)
+git cliff --output CHANGELOG.md              # full changelog
+git cliff --latest --strip header            # latest release notes only
+
 # Watch mode
 cargo watch -x "nextest run" -x "clippy --workspace"
 ```
@@ -77,7 +81,7 @@ The storage engine is built around these core abstractions (see `docs/MVP.md` fo
 Three GitHub Actions workflows in `.github/workflows/`:
 - **ci.yml** — Format check, TOML format (taplo), clippy, cargo-deny, nextest, doctests, coverage (llvm-cov → codecov), benchmarks (main only), MSRV check (main only)
 - **audit.yml** — Weekly security audit + on Cargo.toml/lock changes
-- **release.yml** — Publish to crates.io on `v*` tags
+- **release.yml** — On `v*` tags: generates release notes via git-cliff, creates GitHub release, publishes to crates.io
 
 ## Git Conventions
 
