@@ -238,12 +238,16 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - 10, 50, 100 VMs per host
   - Embedded rondo vs Prometheus + exporter stack
   - Measure CPU%, memory, disk I/O, network bandwidth
+  - **Note**: Remote box (10.10.11.33) has Prometheus and Grafana available for comparison baseline
+  - See `docs/BENCHMARK_PLAN.md` for investigation notes and open questions
 - [x] **5.3** Benchmark C: Ephemeral VM data capture
   - 5s, 10s, 30s, and 45s VM lifecycles simulated
   - Embedded: 100% capture; 15s scrape: 0-7%; 30s scrape: 0-3%
+  - **Next step**: Validate with real VMM using tunable workload durations (see `docs/BENCHMARK_PLAN.md`)
 - [ ] **5.4** Grafana dashboard
   - Showing data exported from embedded stores via remote-write
   - Side-by-side with traditional scrape for visual comparison
+  - **Note**: Prometheus/Grafana available on remote environment; integration path: wire `remote_write::push()` into VMM maintenance loop
 - [x] **5.5** Documentation
   - README: architecture overview, quickstart, performance table, CLI usage
   - `docs/architecture.md`: storage model, data flow, crate structure
