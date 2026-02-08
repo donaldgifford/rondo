@@ -176,9 +176,13 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Direct serial console handling (COM1 0x3F8) without vm-superio
   - Port 0x61 PIT channel 2 toggle for timer calibration, PCI config (0xCFC) stub
   - SIGALRM-based halt detection (3 consecutive IF=0 checks) for clean guest exit
-- [ ] **4.4** Add virtio-blk device in `devices/block.rs`
-  - Backing file for guest disk I/O
-  - Wire into event loop for async I/O completion
+- [x] **4.4** Add virtio-blk device in `devices/block.rs`
+  - Virtio-mmio transport (512 bytes at 0xD000_0000, IRQ 5)
+  - Synchronous I/O against host backing file
+  - Single virtqueue with descriptor chain walking (header → data → status)
+  - Guest discovers via `virtio_mmio.device=512@0xd0000000:5` kernel cmdline parameter
+  - Guest initramfs includes virtio kernel modules (auto-decompressed from .zst/.xz/.gz)
+  - `--disk <path>` CLI flag creates/opens backing file
 - [x] **4.5** Integrate rondo in `metrics.rs`
   - Initialize `Store` with VMM metrics schema (1s/10m, 10s/6h, 5m/7d tiers)
   - Registered 16 series across vCPU exits, virtio-blk I/O, and process stats
@@ -188,10 +192,11 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Records `vcpu_exit_duration_ns` per exit
   - Records `vcpu_run_duration_ns` (time in KVM_RUN)
   - Best-effort recording via `Arc<Mutex<VmMetrics>>`
-- [ ] **4.7** Instrument virtio-blk handler
-  - Record `blk_requests_total` by operation type
-  - Record `blk_request_duration_ns` per request
-  - Record `blk_bytes_total` by direction
+- [x] **4.7** Instrument virtio-blk handler
+  - `record_blk_io()` in vcpu.rs maps `IoOp` → `BlkOp` and calls `record_blk_request()`
+  - Records `blk_requests_total` by operation (read/write/flush)
+  - Records `blk_request_duration_ns` per completed I/O
+  - Records `blk_bytes_read` and `blk_bytes_written` per I/O
 - [x] **4.8** Add VMM process metrics
   - `vmm_rss_bytes` via `/proc/self/status` (VmRSS parsing)
   - `vmm_open_fds` via `/proc/self/fd` (directory entry counting)
@@ -216,7 +221,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 |-------|----------|
 | [x] | Demo VMM boots a Linux guest to serial console (full boot + workload + clean halt) |
 | [x] | vCPU exit metrics are recorded into rondo store (every exit records reason + durations) |
-| [ ] | virtio-blk I/O metrics are recorded (tasks 4.4/4.7 deferred — requires full virtio impl) |
+| [x] | virtio-blk I/O metrics are recorded (virtio-mmio transport, record_blk_io in vCPU loop) |
 | [x] | `consolidate()` runs on 1s tick without blocking the event loop (maintenance thread) |
 | [x] | HTTP API returns queryable metric data (/metrics/query, /metrics/info, /metrics/health) |
 | [x] | Guest workload produces visually distinct patterns (4-phase workload runs to completion) |
