@@ -115,6 +115,23 @@ pub struct Store {
     rings: Vec<Vec<RingBuffer>>,
 }
 
+/// Metadata about a single tier in the store.
+#[derive(Debug, Clone)]
+pub struct TierInfo {
+    /// Number of slots in the ring buffer.
+    pub slot_count: u32,
+    /// Interval between slots in nanoseconds.
+    pub interval_ns: u64,
+    /// Oldest timestamp in the tier, or `None` if empty.
+    pub oldest_timestamp: Option<u64>,
+    /// Newest timestamp in the tier, or `None` if empty.
+    pub newest_timestamp: Option<u64>,
+    /// Whether the tier is empty.
+    pub is_empty: bool,
+    /// Whether the ring buffer has wrapped around.
+    pub has_wrapped: bool,
+}
+
 /// Metadata stored in the store's meta.json file.
 #[derive(Debug, Serialize, Deserialize)]
 struct StoreMetadata {
@@ -522,6 +539,42 @@ impl Store {
         &self.path
     }
 
+    /// Returns the number of tiers for a given schema.
+    pub fn tier_count(&self, schema_index: usize) -> usize {
+        self.rings.get(schema_index).map_or(0, Vec::len)
+    }
+
+    /// Returns tier metadata for a given schema and tier.
+    ///
+    /// Returns `(slot_count, interval_ns, oldest_ts, newest_ts, is_empty, has_wrapped)`.
+    pub fn tier_info(&self, schema_index: usize, tier_index: usize) -> Option<TierInfo> {
+        let ring = self.rings.get(schema_index)?.get(tier_index)?;
+        Some(TierInfo {
+            slot_count: ring.slab().slot_count(),
+            interval_ns: ring.slab().interval_ns(),
+            oldest_timestamp: ring.oldest_timestamp(),
+            newest_timestamp: ring.newest_timestamp(),
+            is_empty: ring.is_empty(),
+            has_wrapped: ring.has_wrapped(),
+        })
+    }
+
+    /// Returns the series count for a specific schema.
+    pub fn schema_series_count(&self, schema_index: usize) -> u32 {
+        self.registry.series_count(schema_index)
+    }
+
+    /// Returns all registered series handles.
+    pub fn handles(&self) -> Vec<SeriesHandle> {
+        self.registry.handles()
+    }
+
+    /// Returns the series name and labels for a handle.
+    pub fn series_info(&self, handle: &SeriesHandle) -> Option<(&str, &[(String, String)])> {
+        let info = self.registry.series_info(handle)?;
+        Some((info.name.as_str(), info.labels.as_slice()))
+    }
+
     /// Queries data from a specific tier of a time series.
     ///
     /// This method provides direct access to a specific storage tier with
@@ -754,6 +807,69 @@ impl Store {
 
         // Run consolidation
         engine.consolidate(&mut self.rings)
+    }
+
+    /// Drains new data from the store for all registered series at the specified tier.
+    ///
+    /// Returns data points that haven't been exported yet according to the provided
+    /// cursor. The cursor is updated to track the latest exported timestamp for each
+    /// series.
+    ///
+    /// This is designed for periodic push to a remote TSDB. Each call returns only
+    /// new data since the last drain.
+    ///
+    /// # Arguments
+    ///
+    /// * `tier` - The tier index to drain from (0 = highest resolution)
+    /// * `cursor` - Export cursor tracking progress; updated in place
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading from the ring buffer fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use rondo::store::Store;
+    /// # use rondo::export::ExportCursor;
+    /// # let store = Store::open("./data", vec![])?;
+    /// let mut cursor = ExportCursor::load_or_new("./data/export_cursor.json")?;
+    ///
+    /// // Drain new data from tier 0
+    /// let exports = store.drain(0, &mut cursor)?;
+    /// for export in &exports {
+    ///     println!("Series {:?}: {} new points", export.handle, export.points.len());
+    /// }
+    ///
+    /// // Persist cursor for next run
+    /// cursor.save()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn drain(
+        &self,
+        tier: usize,
+        cursor: &mut crate::export::ExportCursor,
+    ) -> Result<Vec<crate::export::SeriesExport>> {
+        let handles = self.registry.handles();
+        let mut all_exports = Vec::new();
+
+        for schema_index in 0..self.schemas.len() {
+            let schema_handles: Vec<_> = handles
+                .iter()
+                .filter(|h| h.schema_index == schema_index)
+                .copied()
+                .collect();
+
+            if schema_handles.is_empty() || tier >= self.rings[schema_index].len() {
+                continue;
+            }
+
+            let exports =
+                crate::export::drain_tier(&self.rings, schema_index, tier, &schema_handles, cursor)?;
+            all_exports.extend(exports);
+        }
+
+        Ok(all_exports)
     }
 }
 

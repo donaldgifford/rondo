@@ -389,6 +389,11 @@ impl SeriesRegistry {
         &self.schemas
     }
 
+    /// Returns all registered series handles.
+    pub fn handles(&self) -> Vec<SeriesHandle> {
+        self.series_map.values().map(|info| info.handle()).collect()
+    }
+
     /// Updates the slab series directory with current registrations.
     ///
     /// This method synchronizes the registry state with the slab's series

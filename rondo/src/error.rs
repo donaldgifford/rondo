@@ -37,6 +37,10 @@ pub enum RondoError {
     /// Error during consolidation operations.
     #[error("consolidation error: {0}")]
     Consolidation(#[from] ConsolidationError),
+
+    /// Error during export/drain operations.
+    #[error("export error: {0}")]
+    Export(#[from] ExportError),
 }
 
 /// Errors that can occur when opening or creating a store.
@@ -368,6 +372,48 @@ pub enum ConsolidationError {
     InvalidConfiguration {
         /// Description of what's invalid.
         reason: String,
+    },
+}
+
+/// Errors that can occur during export/drain operations.
+#[derive(Error, Debug)]
+pub enum ExportError {
+    /// Failed to load export cursor from file.
+    #[error("failed to load export cursor from '{}': {source}", path.display())]
+    CursorLoad {
+        /// The cursor file path.
+        path: std::path::PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to parse export cursor from JSON.
+    #[error("failed to parse export cursor from '{}': {source}", path.display())]
+    CursorParse {
+        /// The cursor file path.
+        path: std::path::PathBuf,
+        /// The underlying JSON parsing error.
+        #[source]
+        source: serde_json::Error,
+    },
+
+    /// Failed to save export cursor to file.
+    #[error("failed to save export cursor to '{}': {source}", path.display())]
+    CursorSave {
+        /// The cursor file path.
+        path: std::path::PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to serialize export cursor to JSON.
+    #[error("failed to serialize export cursor: {source}")]
+    CursorSerialize {
+        /// The underlying JSON serialization error.
+        #[source]
+        source: serde_json::Error,
     },
 }
 

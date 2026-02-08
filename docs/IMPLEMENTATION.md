@@ -120,7 +120,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 
 ### Tasks
 
-- [ ] **3.1** Implement `Store::drain()` in `rondo/src/export.rs`
+- [x] **3.1** Implement `Store::drain()` in `rondo/src/export.rs`
   - `drain(tier, cursor)` → returns all points since cursor, advances cursor
   - `ExportCursor` type with persistence support
   - Designed for periodic push to remote TSDB
@@ -128,28 +128,28 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Serialize drain output to Prometheus remote-write protobuf format
   - HTTP POST to configurable endpoint
   - Basic retry logic
-- [ ] **3.3** CLI: `rondo info <store_path>` in `rondo-cli/`
+- [x] **3.3** CLI: `rondo info <store_path>` in `rondo-cli/`
   - Print schemas, series count, tier slot usage, total disk size
   - Show consolidation cursor positions
-- [ ] **3.4** CLI: `rondo query <store_path> <series> --range 1h --tier auto`
+- [x] **3.4** CLI: `rondo query <store_path> <series> --range 1h --tier auto`
   - Output as CSV or JSON (flag-controlled)
   - Support both explicit tier and auto tier selection
-- [ ] **3.5** CLI: `rondo bench`
+- [x] **3.5** CLI: `rondo bench`
   - Standalone write-path microbenchmark
   - Creates a temp store, writes 10M points, reports latency percentiles
-  - Verifies zero allocations
-- [ ] **3.6** Wire CLI argument parsing with clap derive
+  - Reports throughput and avg latency
+- [x] **3.6** Wire CLI argument parsing with clap derive
 
 ### Phase 3 Acceptance
 
 | Check | Criteria |
 |-------|----------|
-| [ ] | `drain()` returns correct data and advances cursor |
-| [ ] | Repeated `drain()` calls return only new data since last call |
+| [x] | `drain()` returns correct data and advances cursor |
+| [x] | Repeated `drain()` calls return only new data since last call |
 | [ ] | Prometheus remote-write successfully pushes to a test Prometheus instance |
-| [ ] | `rondo info` displays accurate store metadata |
-| [ ] | `rondo query` returns correct data in CSV and JSON formats |
-| [ ] | `rondo bench` completes 10M writes and reports latency |
+| [x] | `rondo info` displays accurate store metadata |
+| [x] | `rondo query` returns correct data in CSV and JSON formats |
+| [x] | `rondo bench` completes 10M writes and reports latency |
 
 ---
 

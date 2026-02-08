@@ -77,6 +77,7 @@
 
 pub mod consolidate;
 pub mod error;
+pub mod export;
 pub mod query;
 pub mod ring;
 pub mod schema;
@@ -89,4 +90,4 @@ pub use error::{Result, RondoError};
 pub use query::QueryResult;
 pub use schema::{ConsolidationFn, LabelMatcher, SchemaConfig, TierConfig};
 pub use series::SeriesHandle;
-pub use store::Store;
+pub use store::{Store, TierInfo};

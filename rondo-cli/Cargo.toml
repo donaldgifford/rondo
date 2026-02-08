@@ -2,13 +2,16 @@
 name = "rondo-cli"
 version = "0.1.0"
 edition = "2024"
-description = "CLI for rondo"
+description = "CLI for rondo time-series storage engine"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/donaldgifford/rondo/rondo-cli"
 keywords = ["time-series", "metrics", "embedded", "round-robin", "monitoring"]
 categories = ["database", "embedded"]
 
 [dependencies]
+rondo = { path = "../rondo" }
+clap = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
