@@ -11,7 +11,9 @@ use std::time::Duration;
 use tempfile::tempdir;
 
 /// Base timestamp for tests: a round number that aligns to all tier intervals.
-const BASE_TIME: u64 = 1_000_000_000_000_000_000; // 1e18 ns
+// Base time aligned to 60s boundary (divisible by 60_000_000_000) to ensure
+// deterministic consolidation window alignment across all tier intervals.
+const BASE_TIME: u64 = 1_000_000_020_000_000_000;
 
 /// Helper: creates a schema with 1s -> 10s(avg) -> 60s(max) tiers.
 fn three_tier_schema() -> Vec<SchemaConfig> {
@@ -129,17 +131,20 @@ fn test_tier_cascade() {
     let mut store = Store::open(&store_path, three_tier_schema()).unwrap();
     let handle = store.register("metric", &[]).unwrap();
 
-    // Write data in batches of 50s, consolidating between each batch.
-    // This ensures data is consolidated before tier 0 wraps (60s retention).
-    for batch in 0u32..4 {
-        for i in 0u32..50 {
-            let offset = batch * 50 + i;
+    // Write data in small batches with consolidation between each to prevent
+    // tier 0 from wrapping (it only holds 60 slots at 1s interval).
+    // We write 10 batches of 40s each (400s total) to generate plenty of
+    // tier 1 data for the tier 1→2 cascade.
+    for batch in 0u32..10 {
+        for i in 0u32..40 {
+            let offset = batch * 40 + i;
             let timestamp = BASE_TIME + u64::from(offset) * 1_000_000_000;
             store.record(handle, f64::from(offset * 10), timestamp).unwrap();
         }
 
-        // Consolidate after each batch
-        for _ in 0..10 {
+        // Consolidate until quiescent after each batch.
+        // This triggers tier 0→1, and once tier 1 has enough data, tier 1→2.
+        loop {
             let ops = store.consolidate().unwrap();
             if ops == 0 {
                 break;
@@ -147,11 +152,9 @@ fn test_tier_cascade() {
         }
     }
 
-    // Total: 200s of data written, consolidated in batches
-
-    // Tier 1 should have data (10s averages spanning 200s)
+    // Tier 1 should have data (10s averages spanning 400s = ~40 points)
     let tier1_data: Vec<_> = store
-        .query(handle, 1, BASE_TIME, BASE_TIME + 210_000_000_000)
+        .query(handle, 1, BASE_TIME, BASE_TIME + 410_000_000_000)
         .unwrap()
         .collect();
     assert!(
@@ -159,10 +162,10 @@ fn test_tier_cascade() {
         "Tier 1 should have consolidated data"
     );
 
-    // Tier 2 should have data (cascaded from tier 1, 60s max)
-    // With tier 1 data spanning 200s and 60s windows, should have ~3 points
+    // Tier 2 should have data (cascaded from tier 1, 60s windows)
+    // With 400s of data and 60s windows, should have ~6 points.
     let tier2_data: Vec<_> = store
-        .query(handle, 2, BASE_TIME, BASE_TIME + 210_000_000_000)
+        .query(handle, 2, BASE_TIME, BASE_TIME + 410_000_000_000)
         .unwrap()
         .collect();
 
