@@ -1,15 +1,30 @@
 #!/bin/sh
 # Minimal init for rondo-demo-vmm guest.
 # Mounts filesystems, prints a banner, runs the workload, then powers off.
+#
+# Kernel cmdline parameters:
+#   workload_duration=N  — total workload duration in seconds (default: 18)
 
 mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 
+# Parse workload_duration from kernel command line
+WORKLOAD_DURATION=18
+for param in $(cat /proc/cmdline); do
+    case "$param" in
+        workload_duration=*)
+            WORKLOAD_DURATION="${param#workload_duration=}"
+            ;;
+    esac
+done
+export WORKLOAD_DURATION
+
 echo "========================================"
 echo " rondo-demo-vmm guest"
 echo " kernel: $(uname -r)"
 echo " uptime: $(cat /proc/uptime | cut -d' ' -f1)s"
+echo " workload: ${WORKLOAD_DURATION}s"
 echo "========================================"
 
 # Run synthetic workload (generates metrics-visible patterns)
