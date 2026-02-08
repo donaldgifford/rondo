@@ -108,14 +108,13 @@ fn cmd_info(store_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         println!();
 
         for (i, schema) in schemas.iter().enumerate() {
+            // Fields are at top level due to #[serde(flatten)] in store metadata
             let name = schema
-                .get("config")
-                .and_then(|c| c.get("name"))
+                .get("name")
                 .and_then(|n| n.as_str())
                 .unwrap_or("unknown");
             let max_series = schema
-                .get("config")
-                .and_then(|c| c.get("max_series"))
+                .get("max_series")
                 .and_then(|m| m.as_u64())
                 .unwrap_or(0);
             let hash = schema
@@ -129,31 +128,31 @@ fn cmd_info(store_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
 
             // List tiers from metadata
             if let Some(tiers) = schema
-                .get("config")
-                .and_then(|c| c.get("tiers"))
+                .get("tiers")
                 .and_then(|t| t.as_array())
             {
                 println!("    Tiers: {}", tiers.len());
                 for (j, tier) in tiers.iter().enumerate() {
-                    let interval = tier.get("interval").and_then(|i| i.as_object());
-                    let retention = tier.get("retention").and_then(|r| r.as_object());
+                    // Durations are serialized as f64 seconds via duration_serde
+                    let interval_secs = tier.get("interval").and_then(|i| i.as_f64());
+                    let retention_secs = tier.get("retention").and_then(|r| r.as_f64());
                     let consolidation_fn = tier
                         .get("consolidation_fn")
                         .and_then(|c| {
                             if c.is_null() {
                                 None
                             } else {
-                                Some(format!("{c}"))
+                                c.as_str().map(|s| s.to_string())
                             }
                         });
 
-                    let interval_str = interval
-                        .and_then(|i| i.get("secs").and_then(|s| s.as_u64()))
-                        .map(format_duration_secs)
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let interval_str = interval_secs
+                        .map(|s| format_duration_secs(s as u64))
                         .unwrap_or_else(|| "?".to_string());
-                    let retention_str = retention
-                        .and_then(|r| r.get("secs").and_then(|s| s.as_u64()))
-                        .map(format_duration_secs)
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let retention_str = retention_secs
+                        .map(|s| format_duration_secs(s as u64))
                         .unwrap_or_else(|| "?".to_string());
 
                     let fn_str = consolidation_fn
@@ -240,14 +239,17 @@ fn cmd_query(
         })
         .ok_or_else(|| format!("Series '{series_name}' not found"))?;
 
-    // Parse time range
+    // Parse time range ("all" queries everything, otherwise relative to now)
     let range_ns = parse_duration(range)?;
-    #[allow(clippy::cast_possible_truncation)] // Current epoch nanos fit in u64 until year 2554
-    let now_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos() as u64;
-    let start_ns = now_ns.saturating_sub(range_ns);
-    let end_ns = now_ns;
+    let (start_ns, end_ns) = if range_ns == u64::MAX {
+        (0, u64::MAX)
+    } else {
+        #[allow(clippy::cast_possible_truncation)] // Epoch nanos fit in u64 until year 2554
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos() as u64;
+        (now_ns.saturating_sub(range_ns), now_ns)
+    };
 
     // Query data
     let result = if tier_str == "auto" {
@@ -361,10 +363,16 @@ fn cmd_bench(points: u64, series_count: u32) -> Result<(), Box<dyn std::error::E
 }
 
 /// Parses a human-readable duration string (e.g., "1h", "30m", "7d") to nanoseconds.
+///
+/// Special value `"all"` returns `u64::MAX` to indicate "query all data".
 fn parse_duration(s: &str) -> Result<u64, Box<dyn std::error::Error>> {
     let s = s.trim();
     if s.is_empty() {
         return Err("Empty duration string".into());
+    }
+
+    if s == "all" {
+        return Ok(u64::MAX);
     }
 
     let (num_str, unit) = s.split_at(s.len() - 1);
@@ -424,6 +432,10 @@ fn dir_size(path: &PathBuf) -> Result<u64, Box<dyn std::error::Error>> {
 }
 
 /// Reconstructs `SchemaConfig` values from stored metadata JSON.
+///
+/// The store uses `#[serde(flatten)]` on `SchemaConfig`, so schema fields
+/// (name, tiers, etc.) are at the top level of each schema entry, not nested
+/// under a `"config"` key. The extra `"hash"` field is ignored by serde.
 fn reconstruct_schemas(meta: &serde_json::Value) -> Vec<rondo::SchemaConfig> {
     let Some(schemas) = meta.get("schemas").and_then(|s| s.as_array()) else {
         return Vec::new();
@@ -431,9 +443,6 @@ fn reconstruct_schemas(meta: &serde_json::Value) -> Vec<rondo::SchemaConfig> {
 
     schemas
         .iter()
-        .filter_map(|schema| {
-            let config = schema.get("config")?;
-            serde_json::from_value::<rondo::SchemaConfig>(config.clone()).ok()
-        })
+        .filter_map(|schema| serde_json::from_value::<rondo::SchemaConfig>(schema.clone()).ok())
         .collect()
 }
