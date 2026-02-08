@@ -30,6 +30,10 @@ BASE_DIR="/tmp/rondo_bench_scale"
 CMDLINE_BASE="console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 noapic notsc clocksource=jiffies lpj=1000000 rdinit=/init"
 SAMPLE_INTERVAL=2
 
+# Global PID tracking for cleanup on interrupt / SSH disconnect
+ALL_VMM_PIDS=()
+SAMPLER_PID=""
+
 # ── Parse arguments ───────────────────────────────────────────────────
 
 while [[ $# -gt 0 ]]; do
@@ -64,6 +68,31 @@ while [[ $# -gt 0 ]]; do
 		;;
 	esac
 done
+
+# ── Trap: cleanup on exit / interrupt ─────────────────────────────────
+
+cleanup_all() {
+	echo ""
+	echo "Cleaning up all VMM processes..."
+	rm -f "${CONTROL_FILE:-}" 2>/dev/null || true
+
+	if [[ -n "$SAMPLER_PID" ]] && kill -0 "$SAMPLER_PID" 2>/dev/null; then
+		kill "$SAMPLER_PID" 2>/dev/null || true
+	fi
+
+	for pid in "${ALL_VMM_PIDS[@]}"; do
+		kill "$pid" 2>/dev/null || true
+	done
+	sleep 1
+	for pid in "${ALL_VMM_PIDS[@]}"; do
+		kill -9 "$pid" 2>/dev/null || true
+	done
+
+	ALL_VMM_PIDS=()
+	echo "Cleanup done."
+}
+
+trap cleanup_all EXIT INT TERM HUP
 
 # ── Pre-flight checks ────────────────────────────────────────────────
 
@@ -100,6 +129,7 @@ preflight() {
 	echo "  binary:    $VMM_BINARY"
 	echo "  workload:  ${WORKLOAD_DURATION}s"
 	echo "  counts:    $COUNTS"
+	echo "  ulimit -n: $(ulimit -n)"
 	echo ""
 }
 
@@ -107,7 +137,9 @@ preflight() {
 
 # Sample aggregate resource usage for a list of PIDs.
 # Writes CSV lines: timestamp,total_rss_kb,total_cpu_ticks,total_fds,alive_count
+# Runs with set +e so individual /proc read failures don't kill the sampler.
 sample_resources() {
+	set +e
 	local csv_file="$1"
 	shift
 	local pids=("$@")
@@ -138,7 +170,7 @@ sample_resources() {
 
 				# Open file descriptors
 				local fds
-				fds=$(find "/proc/$pid/fd" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l || echo 0)
+				fds=$(find "/proc/$pid/fd" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l)
 				total_fds=$((total_fds + fds))
 			fi
 		done
@@ -156,10 +188,12 @@ sample_resources() {
 
 # ── VMM launcher ──────────────────────────────────────────────────────
 
+# Launches VMMs directly in the current shell (not a subshell) so PIDs
+# are trackable. Populates the global ALL_VMM_PIDS array and prints
+# the PID list to stdout.
 launch_vmms() {
 	local count=$1
 	local run_dir="$2"
-	local pids=()
 
 	mkdir -p "$run_dir/stores" "$run_dir/logs"
 
@@ -176,32 +210,36 @@ launch_vmms() {
 			--cmdline "$CMDLINE_BASE workload_duration=$WORKLOAD_DURATION" \
 			>"$log_file" 2>&1 &
 
-		pids+=("$!")
+		ALL_VMM_PIDS+=("$!")
 
-		# Small stagger to avoid thundering herd on KVM
+		# Stagger launches: 100ms per VM, plus 500ms pause every 10th VM.
+		# At 100 VMs this takes ~15s to fully launch, avoiding KVM/I/O storms.
+		sleep 0.1
 		if [[ $((i % 10)) -eq 0 ]]; then
-			sleep 0.2
+			sleep 0.5
+			echo "  ... launched $i/$count"
 		fi
 	done
-
-	echo "${pids[*]}"
 }
 
-# ── Cleanup ───────────────────────────────────────────────────────────
+# ── Cleanup for a single round ────────────────────────────────────────
 
-cleanup_pids() {
+cleanup_round() {
 	local pids=("$@")
 	for pid in "${pids[@]}"; do
 		if kill -0 "$pid" 2>/dev/null; then
 			kill "$pid" 2>/dev/null || true
 		fi
 	done
-	# Give them a moment, then force-kill stragglers
 	sleep 2
 	for pid in "${pids[@]}"; do
 		if kill -0 "$pid" 2>/dev/null; then
 			kill -9 "$pid" 2>/dev/null || true
 		fi
+	done
+	# Wait to reap zombies
+	for pid in "${pids[@]}"; do
+		wait "$pid" 2>/dev/null || true
 	done
 }
 
@@ -324,25 +362,29 @@ run_benchmark() {
 	CONTROL_FILE="$run_dir/.sampling"
 	touch "$CONTROL_FILE"
 
-	# Launch VMMs
+	# Track PIDs for this round (slice of global array)
+	local round_start=${#ALL_VMM_PIDS[@]}
+
+	# Launch VMMs (populates ALL_VMM_PIDS directly, no subshell)
 	echo "Launching $count VMMs (workload: ${WORKLOAD_DURATION}s)..."
-	local pid_str
-	pid_str=$(launch_vmms "$count" "$run_dir")
-	local pids
-	read -ra pids <<<"$pid_str"
-	echo "  Launched ${#pids[@]} VMMs"
+	launch_vmms "$count" "$run_dir"
+
+	# Extract this round's PIDs from the global array
+	local round_pids=("${ALL_VMM_PIDS[@]:$round_start}")
+	echo "  Launched ${#round_pids[@]} VMMs"
 
 	# Start resource sampling in background
 	local csv_file="$run_dir/resources.csv"
-	sample_resources "$csv_file" "${pids[@]}" &
-	local sampler_pid=$!
+	sample_resources "$csv_file" "${round_pids[@]}" &
+	SAMPLER_PID=$!
 
-	# Wait for all VMMs to finish (they exit after workload completes)
-	local timeout=$((WORKLOAD_DURATION + 30)) # workload + boot + teardown headroom
+	# Wait for all VMMs to finish (they exit after workload completes).
+	# Budget: stagger time (~15s for 100 VMs) + workload + boot/teardown.
+	local timeout=$((WORKLOAD_DURATION + 60))
 	local waited=0
 	while [[ $waited -lt $timeout ]]; do
 		local alive=0
-		for pid in "${pids[@]}"; do
+		for pid in "${round_pids[@]}"; do
 			if kill -0 "$pid" 2>/dev/null; then
 				alive=$((alive + 1))
 			fi
@@ -358,11 +400,14 @@ run_benchmark() {
 	# Stop sampler
 	rm -f "$CONTROL_FILE"
 	sleep 1
-	kill "$sampler_pid" 2>/dev/null || true
-	wait "$sampler_pid" 2>/dev/null || true
+	if kill -0 "$SAMPLER_PID" 2>/dev/null; then
+		kill "$SAMPLER_PID" 2>/dev/null || true
+	fi
+	wait "$SAMPLER_PID" 2>/dev/null || true
+	SAMPLER_PID=""
 
-	# Kill any stragglers
-	cleanup_pids "${pids[@]}"
+	# Kill any stragglers and reap zombies
+	cleanup_round "${round_pids[@]}"
 
 	# Count successful exits
 	local successes=0
@@ -443,8 +488,8 @@ main() {
 	# Run benchmarks for each count
 	for count in $COUNTS; do
 		run_benchmark "$count" "$results_dir"
-		# Clean up stores between runs
-		rm -rf "${BASE_DIR}/run_${count}/stores" 2>/dev/null || true
+		# Clean up stores between runs to avoid disk buildup
+		rm -rf "${results_dir}/run_${count}/stores" 2>/dev/null || true
 		sleep 2
 	done
 
