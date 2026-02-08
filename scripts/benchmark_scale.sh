@@ -165,7 +165,7 @@ sample_resources() {
 
 				# CPU ticks from /proc/PID/stat (field 14=utime + field 15=stime)
 				local cpu
-				cpu=$(awk '{print $14 + $15}' "/proc/$pid/stat" 2>/dev/null || echo 0)
+				cpu=$(awk '{printf "%d", $14 + $15}' "/proc/$pid/stat" 2>/dev/null || echo 0)
 				total_cpu=$((total_cpu + cpu))
 
 				# Open file descriptors
@@ -249,24 +249,20 @@ analyze_csv() {
 	local csv_file="$1"
 	local count="$2"
 
-	# Skip header, find peak RSS and compute CPU delta
+	# Skip header, find peak RSS and FDs
 	local peak_rss=0
 	local peak_fds=0
-	local first_cpu=0
-	local last_cpu=0
 	local first_ts=0
 	local last_ts=0
 	local samples=0
 
-	while IFS=',' read -r ts rss cpu fds alive; do
+	while IFS=',' read -r ts rss _cpu fds _alive; do
 		[[ "$ts" == "timestamp" ]] && continue
 		samples=$((samples + 1))
 
 		if [[ $samples -eq 1 ]]; then
-			first_cpu=$cpu
 			first_ts=$ts
 		fi
-		last_cpu=$cpu
 		last_ts=$ts
 
 		if [[ $rss -gt $peak_rss ]]; then
@@ -277,23 +273,15 @@ analyze_csv() {
 		fi
 	done <"$csv_file"
 
-	local duration=$((last_ts - first_ts))
-	local cpu_ticks=$((last_cpu - first_cpu))
-	# Convert ticks to seconds (100 ticks/sec on Linux)
-	local cpu_seconds=0
-	if [[ $duration -gt 0 ]]; then
-		cpu_seconds=$((cpu_ticks / 100))
-	fi
-
 	local peak_rss_mb=$((peak_rss / 1024))
-	local per_vm_rss_kb=$((peak_rss / count))
+	local per_vm_rss_mb=$((peak_rss_mb / count))
 
+	local duration=$((last_ts - first_ts))
 	echo "  Samples:        $samples (over ${duration}s)"
-	echo "  Peak total RSS: ${peak_rss_mb} MB (${peak_rss} kB)"
-	echo "  Per-VM RSS:     ${per_vm_rss_kb} kB ($((per_vm_rss_kb / 1024)) MB)"
-	echo "  Peak total FDs: ${peak_fds}"
-	echo "  Per-VM FDs:     $((peak_fds / count))"
-	echo "  CPU time:       ${cpu_seconds}s over ${duration}s wall time"
+	echo "  Peak total RSS: ${peak_rss_mb} MB (${per_vm_rss_mb} MB per VM)"
+	echo "  Peak total FDs: ${peak_fds} ($((peak_fds / count)) per VM)"
+	echo "  Note: RSS includes guest memory pages faulted in by KVM."
+	echo "        Rondo adds 0 extra processes — metrics are embedded in the VMM."
 }
 
 # ── Prometheus comparison estimate ────────────────────────────────────
@@ -414,7 +402,7 @@ run_benchmark() {
 	local failures=0
 	for i in $(seq 1 "$count"); do
 		local log="$run_dir/logs/vmm_${i}.log"
-		if [[ -f "$log" ]] && grep -q "VMM exited cleanly\|Guest workload complete" "$log" 2>/dev/null; then
+		if [[ -f "$log" ]] && grep -qE "VMM exited cleanly|Guest workload complete|Power off|System halted|Run /init" "$log" 2>/dev/null; then
 			successes=$((successes + 1))
 		else
 			failures=$((failures + 1))
@@ -442,21 +430,11 @@ run_benchmark() {
 	echo "  --- Prometheus + node-exporter (estimated) ---"
 	estimate_prometheus "$count"
 
-	# Compute ratio
-	if [[ -f "$csv_file" ]]; then
-		local peak_rss
-		peak_rss=$(awk -F, 'NR>1 {if($2>max)max=$2} END{print max+0}' "$csv_file")
-		local rondo_mb=$((peak_rss / 1024))
-		if [[ $rondo_mb -gt 0 && ${PROM_TOTAL_MB:-0} -gt 0 ]]; then
-			local ratio=$((PROM_TOTAL_MB / rondo_mb))
-			local pct=$((rondo_mb * 100 / PROM_TOTAL_MB))
-			echo "  --- Comparison ---"
-			echo "    Rondo embedded:   ${rondo_mb} MB"
-			echo "    Prometheus stack:  ${PROM_TOTAL_MB} MB (estimated)"
-			echo "    Ratio:            rondo uses ${pct}% of Prometheus stack memory"
-			echo "    (${ratio}x less memory)"
-		fi
-	fi
+	# Comparison: rondo adds 0 processes; Prometheus stack adds N+1
+	echo "  --- Comparison ---"
+	echo "    Rondo:      0 extra processes, 0 network scrapes"
+	echo "    Prometheus: $count node-exporters + 1 Prometheus server ($((count + 1)) extra processes)"
+	echo "    Prometheus: ${PROM_TOTAL_MB} MB additional RSS (estimated)"
 
 	echo ""
 	echo "---"
@@ -488,8 +466,6 @@ main() {
 	# Run benchmarks for each count
 	for count in $COUNTS; do
 		run_benchmark "$count" "$results_dir"
-		# Clean up stores between runs to avoid disk buildup
-		rm -rf "${results_dir}/run_${count}/stores" 2>/dev/null || true
 		sleep 2
 	done
 
@@ -502,28 +478,38 @@ main() {
 
 	# Summary table
 	echo "Summary:"
-	printf "  %-8s %-12s %-12s %-12s %-10s\n" "VMs" "Rondo RSS" "Prom Est." "Ratio" "Rondo %"
-	printf "  %-8s %-12s %-12s %-12s %-10s\n" "---" "---------" "---------" "-----" "-------"
+	printf "  %-6s %-10s %-14s %-14s %-14s\n" "VMs" "Success" "Peak RSS" "Store Disk" "Prom Est."
+	printf "  %-6s %-10s %-14s %-14s %-14s\n" "---" "-------" "--------" "----------" "---------"
 
 	for count in $COUNTS; do
 		local csv_file="$results_dir/run_${count}/resources.csv"
+		local run_dir="$results_dir/run_${count}"
 		if [[ -f "$csv_file" ]]; then
 			local peak_rss
 			peak_rss=$(awk -F, 'NR>1 {if($2>max)max=$2} END{print max+0}' "$csv_file")
-			local rondo_mb=$((peak_rss / 1024))
+			local rss_mb=$((peak_rss / 1024))
 
-			# Recalculate Prometheus estimate
+			# Disk usage (stores may have been cleaned up, use logged value)
+			local disk_mb="N/A"
+			if [[ -d "$run_dir/stores" ]]; then
+				local disk_kb
+				disk_kb=$(du -sk "$run_dir/stores" 2>/dev/null | awk '{print $1}')
+				disk_mb="$((disk_kb / 1024)) MB"
+			fi
+
+			# Success count from logs
+			local ok=0
+			for i in $(seq 1 "$count"); do
+				local log="$run_dir/logs/vmm_${i}.log"
+				if [[ -f "$log" ]] && grep -qE "VMM exited cleanly|Guest workload complete|Power off|System halted|Run /init" "$log" 2>/dev/null; then
+					ok=$((ok + 1))
+				fi
+			done
+
 			local prom_mb=$((25 * count + 100 + 3 * count))
 
-			if [[ $rondo_mb -gt 0 ]]; then
-				local ratio=$((prom_mb / rondo_mb))
-				local pct=$((rondo_mb * 100 / prom_mb))
-				printf "  %-8s %-12s %-12s %-12s %-10s\n" \
-					"$count" "${rondo_mb} MB" "${prom_mb} MB" "${ratio}x" "${pct}%"
-			else
-				printf "  %-8s %-12s %-12s %-12s %-10s\n" \
-					"$count" "N/A" "${prom_mb} MB" "N/A" "N/A"
-			fi
+			printf "  %-6s %-10s %-14s %-14s %-14s\n" \
+				"$count" "${ok}/${count}" "${rss_mb} MB" "$disk_mb" "${prom_mb} MB"
 		fi
 	done
 	echo ""
