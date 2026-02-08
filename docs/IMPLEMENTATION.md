@@ -52,7 +52,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Handle ring buffer wraparound in read path
   - Skip NaN entries
 - [x] **1.7** Wire up `rondo/src/lib.rs` — public API re-exports, crate-level docs
-- [ ] **1.8** Unit tests
+- [x] **1.8** Unit tests
   - Ring buffer: wraparound, slot computation, boundary conditions
   - Slab: create/open/reopen lifecycle, mmap integrity
   - Series: registration, duplicate detection, max_series limit
