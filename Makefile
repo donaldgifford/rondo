@@ -111,8 +111,7 @@ define run-vmm-bench
 		echo '' && echo '=== $(1)s VM lifecycle: metrics store ===' && \
 		cargo run -p rondo-cli -- info vmm_metrics && \
 		echo '' && echo '=== Data point counts ===' && \
-		POINTS=$$(cargo run -p rondo-cli -- query vmm_metrics 'vcpu_exits_total{reason=io}' --range all --tier 0 --format csv 2>/dev/null | grep -c '^[0-9]') && \
-		echo \"vcpu_exits_total{reason=io}: $$POINTS data points (expected ~$(1))\" "
+		cargo run -q -p rondo-cli -- query vmm_metrics vmm_uptime_seconds --range all --tier 0 --format csv 2>/dev/null | grep -c '^[0-9]' | xargs -I{} echo 'vmm_uptime_seconds: {} data points (expected ~$(1))' "
 endef
 
 vmm-bench-15: vmm-build ## Run 15s VM lifecycle benchmark
