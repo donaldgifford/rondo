@@ -213,13 +213,13 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 
 | Check | Criteria |
 |-------|----------|
-| [ ] | Demo VMM boots a Linux guest to serial console |
-| [ ] | vCPU exit metrics are recorded into rondo store |
-| [ ] | virtio-blk I/O metrics are recorded |
-| [ ] | `consolidate()` runs on 1s tick without blocking the event loop |
-| [ ] | HTTP API returns queryable metric data |
-| [ ] | Guest workload produces visually distinct patterns (bursts, idle, I/O) |
-| [ ] | Total rondo overhead in VMM is < 50 lines in hot path |
+| [ ] | Demo VMM boots a Linux guest to serial console (requires guest kernel build) |
+| [x] | vCPU exit metrics are recorded into rondo store (every exit records reason + durations) |
+| [ ] | virtio-blk I/O metrics are recorded (tasks 4.4/4.7 deferred — requires full virtio impl) |
+| [x] | `consolidate()` runs on 1s tick without blocking the event loop (maintenance thread) |
+| [x] | HTTP API returns queryable metric data (/metrics/query, /metrics/info, /metrics/health) |
+| [ ] | Guest workload produces visually distinct patterns (workload.sh written, needs testing) |
+| [x] | Total rondo overhead in VMM is < 50 lines in hot path (~10 lines: record_exit + lock) |
 
 ---
 
