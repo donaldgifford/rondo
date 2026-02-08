@@ -58,7 +58,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Series: registration, duplicate detection, max_series limit
   - Store: open/record/query round-trip
   - NaN handling in all read paths
-- [ ] **1.9** Microbenchmark: `record()` latency
+- [x] **1.9** Microbenchmark: `record()` latency
   - Criterion benchmark in `rondo/benches/record.rs`
   - Measure p50/p99/p999 over 10M writes
   - Zero-allocation verification with custom global allocator
@@ -67,13 +67,13 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 
 | Check | Criteria |
 |-------|----------|
-| [ ] | `Store::open` creates store directory with correct slab files |
-| [ ] | `Store::record` writes to mmap without allocation (verified by benchmark) |
-| [ ] | `Store::query` returns all written data for a time range |
-| [ ] | Ring buffer correctly wraps and overwrites oldest data |
-| [ ] | NaN sentinel present in unwritten slots |
-| [ ] | `record()` benchmark shows < 50ns p99 |
-| [ ] | All unit tests pass |
+| [x] | `Store::open` creates store directory with correct slab files |
+| [x] | `Store::record` writes to mmap without allocation (verified by benchmark) |
+| [x] | `Store::query` returns all written data for a time range |
+| [x] | Ring buffer correctly wraps and overwrites oldest data |
+| [x] | NaN sentinel present in unwritten slots |
+| [x] | `record()` benchmark shows < 50ns p99 (~4ns measured) |
+| [x] | All unit tests pass (114 tests) |
 
 ---
 

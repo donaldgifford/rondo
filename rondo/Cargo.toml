@@ -16,7 +16,12 @@ thiserror = { workspace = true }
 memmap2 = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 tempfile = "3.8"
+
+[[bench]]
+name = "record"
+harness = false
 
 [lints]
 workspace = true
