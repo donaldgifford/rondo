@@ -41,7 +41,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Label set storage and matching against schema matchers
   - Series index persistence (`series_index.bin`)
   - Return error when `max_series` is reached
-- [ ] **1.5** Implement `Store` in `rondo/src/store.rs`
+- [x] **1.5** Implement `Store` in `rondo/src/store.rs`
   - `Store::open(path, schemas)` — create or open a store directory, initialize slabs per schema/tier
   - `Store::register(name, labels)` → `SeriesHandle`
   - `Store::record(handle, value, timestamp)` — **the hot path**: write to mmap'd slot, no alloc, no syscall

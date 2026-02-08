@@ -153,6 +153,7 @@ impl SeriesInfo {
 ///
 /// The registry is designed for single-threaded access patterns. External
 /// synchronization must be provided if used across multiple threads.
+#[derive(Debug)]
 pub struct SeriesRegistry {
     /// Schema configurations.
     schemas: Vec<SchemaConfig>,
