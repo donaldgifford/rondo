@@ -87,6 +87,67 @@ The VMM registers 16 series across three categories:
 - **Cursor persistence**: `vmm_metrics/cursor_prometheus.json` tracks export progress for incremental delivery
 - **Retry**: Exponential backoff (100ms initial, 3 retries)
 
+## Troubleshooting
+
+### No data in Prometheus / Grafana
+
+#### 1. Enable the remote-write receiver on Prometheus
+
+The remote-write receiver is **not enabled by default**. If you're using kube-prometheus-stack, set it in your Helm values:
+
+```yaml
+prometheus:
+  prometheusSpec:
+    enableRemoteWriteReceiver: true
+```
+
+Or pass `--web.enable-remote-write-receiver` to the Prometheus binary directly.
+
+Verify the endpoint is accepting writes:
+
+```bash
+curl -X POST https://prometheus.fartlab.dev/api/v1/write \
+  -H "Content-Type: application/x-protobuf" \
+  -d ""
+```
+
+- `400 Bad Request` — receiver is enabled (empty body is invalid, but the endpoint exists)
+- `404 Not Found` or `405 Method Not Allowed` — receiver is **not** enabled
+
+#### 2. Check VMM logs for export activity
+
+The export thread logs at `info` level. Look for these lines in the VMM output:
+
+| Log message | Meaning |
+|-------------|---------|
+| `remote-write export thread started` | Thread spawned successfully |
+| `remote-write export loop started` | Loop entered, will push after first 10s interval |
+| `remote-write: pushed N series (M with data)` | Data sent to Prometheus |
+| `remote-write: push failed: ...` | HTTP request failed (check error message) |
+| `remote-write: no new data to export` | Drain returned nothing (debug level) |
+
+If none of these appear, the `--remote-write` flag may not have been passed.
+
+#### 3. Check the cursor file
+
+```bash
+ssh donald@10.10.11.33 "cat ~/rondo/vmm_metrics/cursor_prometheus.json"
+```
+
+If the file exists with position data, the export loop completed at least one successful push. If it doesn't exist, no push succeeded.
+
+#### 4. Check network connectivity from the VMM box
+
+```bash
+ssh donald@10.10.11.33 "curl -v https://prometheus.fartlab.dev/api/v1/write"
+```
+
+Verify the VMM box can reach Prometheus. TLS errors or timeouts indicate a network/DNS issue.
+
+#### 5. Timing
+
+The export thread sleeps for **10 seconds** before its first push. If the VM shuts down before the first sleep completes, nothing gets pushed. For a 15s workload, only one push cycle may fire. Use `workload_duration=45` or longer to ensure multiple export cycles.
+
 ## Updating the Dashboard
 
 1. Edit `deploy/grafana/rondo-vmm-dashboard.json` (the source of truth)
