@@ -31,7 +31,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Series directory: fixed-size array mapping series ID → column offset
   - Create + open with `memmap2` (mmap the entire file)
   - Pre-allocate file to exact calculated size on creation
-- [ ] **1.3** Implement ring buffer logic in `rondo/src/ring.rs`
+- [x] **1.3** Implement ring buffer logic in `rondo/src/ring.rs`
   - Slot computation from timestamp + interval
   - Write cursor advancement with wraparound
   - Columnar layout: timestamp column + one f64 column per series

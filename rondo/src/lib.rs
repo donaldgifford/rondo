@@ -25,5 +25,6 @@
 //! - Anywhere you need the SQLite of time-series storage
 
 pub mod error;
+pub mod ring;
 pub mod schema;
 pub mod slab;
