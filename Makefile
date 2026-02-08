@@ -12,15 +12,21 @@ VMM_CARGO    := . ~/.cargo/env && cd $(VMM_DIR)
 RSYNC_EXCLUDE := --exclude target/ --exclude .git/ --exclude .claude/ \
                  --exclude consolidation_demo_store/
 
+# Base kernel command line for the demo VMM guest
+VMM_CMDLINE_BASE := console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 noapic notsc clocksource=jiffies lpj=1000000 rdinit=/init
+VMM_KERNEL       := rondo-demo-vmm/guest/out/bzImage
+VMM_INITRAMFS    := rondo-demo-vmm/guest/out/initramfs.cpio
+
 .PHONY: help build test clippy bench \
         vmm-sync vmm-build vmm-test vmm-clippy vmm-run vmm-bench vmm-shell \
-        clean
+        vmm-demo vmm-demo-query vmm-bench-15 vmm-bench-30 vmm-bench-45 \
+        vmm-bench-capture clean
 
 # ─── Local (macOS) ─────────────────────────────────────────────────────
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build all workspace crates (local)
 	cargo build --workspace
@@ -57,7 +63,7 @@ vmm-clippy: vmm-sync ## Run clippy on remote Linux box
 vmm-run: vmm-build ## Run the demo VMM on remote Linux box (pass ARGS=)
 	ssh $(VMM_HOST) "$(VMM_CARGO) && cargo run -p rondo-demo-vmm -- $(ARGS)"
 
-vmm-bench: vmm-sync ## Run benchmarks on remote Linux box
+vmm-bench: vmm-sync ## Run write-path benchmarks on remote Linux box
 	ssh $(VMM_HOST) "$(VMM_CARGO) && cargo run -p rondo --release --example benchmark_comparison"
 
 vmm-shell: ## Open SSH shell on remote Linux box in project dir
@@ -69,8 +75,68 @@ vmm-check-kvm: ## Verify KVM is available on remote box
 vmm-guest: vmm-sync ## Build guest kernel and initramfs on remote box
 	ssh $(VMM_HOST) "cd $(VMM_DIR)/rondo-demo-vmm/guest && ./build.sh"
 
+vmm-demo: vmm-build ## Build guest, run VMM demo end-to-end, query metrics afterward
+	ssh $(VMM_HOST) "$(VMM_CARGO) && \
+		cd rondo-demo-vmm/guest && ./build.sh && cd $(VMM_DIR) && \
+		rm -rf vmm_metrics && \
+		cargo run -p rondo-demo-vmm -- \
+			--kernel $(VMM_KERNEL) \
+			--initramfs $(VMM_INITRAMFS) && \
+		echo '' && echo '=== Post-run metrics store ===' && \
+		cargo run -p rondo-cli -- info vmm_metrics && \
+		echo '' && echo '=== vCPU exit totals (tier 0) ===' && \
+		cargo run -p rondo-cli -- query vmm_metrics vcpu_exits_total --range all --tier 0 --format csv | tail -20"
+
+vmm-demo-query: ## Query metrics store on remote box (after vmm-demo)
+	ssh $(VMM_HOST) "$(VMM_CARGO) && \
+		cargo run -p rondo-cli -- info vmm_metrics && \
+		echo '' && echo '=== Series list ===' && \
+		cargo run -p rondo-cli -- info vmm_metrics 2>&1 | grep -E '^\s+-' || true"
+
 vmm-ssh: ## Run arbitrary command on remote box (pass CMD=)
 	ssh $(VMM_HOST) "$(VMM_CARGO) && $(CMD)"
+
+# ─── VMM Lifecycle Benchmarks ────────────────────────────────────────
+
+# Helper: run VMM with a specific workload duration, then query and count data points.
+# Usage: $(call run-vmm-bench,DURATION_SECONDS)
+define run-vmm-bench
+	ssh $(VMM_HOST) "$(VMM_CARGO) && \
+		cd rondo-demo-vmm/guest && ./build.sh && cd $(VMM_DIR) && \
+		rm -rf vmm_metrics && \
+		cargo run -p rondo-demo-vmm -- \
+			--kernel $(VMM_KERNEL) \
+			--initramfs $(VMM_INITRAMFS) \
+			--cmdline '$(VMM_CMDLINE_BASE) workload_duration=$(1)' && \
+		echo '' && echo '=== $(1)s VM lifecycle: metrics store ===' && \
+		cargo run -p rondo-cli -- info vmm_metrics && \
+		echo '' && echo '=== Data point counts ===' && \
+		POINTS=$$(cargo run -p rondo-cli -- query vmm_metrics vcpu_exits_total --range all --tier 0 --format csv 2>/dev/null | grep -c '^[0-9]') && \
+		echo \"vcpu_exits_total: $$POINTS data points (expected ~$(1))\" "
+endef
+
+vmm-bench-15: vmm-build ## Run 15s VM lifecycle benchmark
+	$(call run-vmm-bench,15)
+
+vmm-bench-30: vmm-build ## Run 30s VM lifecycle benchmark
+	$(call run-vmm-bench,30)
+
+vmm-bench-45: vmm-build ## Run 45s VM lifecycle benchmark
+	$(call run-vmm-bench,45)
+
+vmm-bench-capture: vmm-build ## Run 15/30/45s benchmarks and compare capture rates
+	@echo "=== Benchmark C: Ephemeral VM Data Capture ==="
+	@echo ""
+	@echo "--- 15s VM lifecycle ---"
+	$(call run-vmm-bench,15)
+	@echo ""
+	@echo "--- 30s VM lifecycle ---"
+	$(call run-vmm-bench,30)
+	@echo ""
+	@echo "--- 45s VM lifecycle ---"
+	$(call run-vmm-bench,45)
+	@echo ""
+	@echo "=== Benchmark C complete ==="
 
 # ─── Cleanup ──────────────────────────────────────────────────────────
 
