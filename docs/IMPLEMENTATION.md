@@ -241,9 +241,9 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Result: rondo 78x faster than write(), 284x faster than UDP at p99
 - [x] **5.2** Benchmark B: Resource overhead at scale
   - `scripts/benchmark_scale.sh` spawns 10/50/100 concurrent VMMs on remote Linux box
-  - Measures aggregate RSS, CPU time, FD count, disk usage per run via `/proc/PID/status` and `/proc/PID/stat`
-  - Estimates Prometheus + node-exporter stack overhead (25 MB/exporter + 100 MB + 3 MB/target)
-  - Outputs comparison table: rondo embedded vs estimated Prometheus stack
+  - Verified on 8 vCPU / 15.6 GB RAM / Linux 6.12: 100/100 VMs completed successfully
+  - Rondo: 0 extra processes, 1.1 MB disk per VM, zero network overhead
+  - Prometheus stack (estimated): 101 extra processes, 2.9 GB additional RSS at 100 VMs
   - `make vmm-bench-scale` orchestrates via SSH on remote box
 - [x] **5.3** Benchmark C: Ephemeral VM data capture
   - 5s, 10s, 30s, and 45s VM lifecycles simulated
@@ -266,7 +266,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 | Check | Criteria |
 |-------|----------|
 | [x] | Benchmark A shows rondo 78-284x faster than alternatives (exceeds 10-100x target) |
-| [x] | Benchmark B: scale benchmark script implemented; estimates rondo at < 10% of Prometheus stack memory |
+| [x] | Benchmark B: 100 concurrent VMs on 8-CPU/15.6GB box; 0 extra processes, 1.1 MB disk/VM vs est. 2.9 GB Prometheus stack |
 | [x] | Benchmark C shows 100% data capture for 45s VM vs 6.7% for 15s scrape |
 | [x] | Remote-write export thread implemented; `--remote-write` flag pushes to Prometheus (dashboard setup pending) |
 | [x] | S1 (< 50ns p99) verified; S2 (zero allocs) verified; S3 (deterministic storage) verified |

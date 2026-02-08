@@ -1,2 +1,4 @@
 [tools]
 rust = "1.92"
+shellcheck = "latest"
+shfmt = "latest"

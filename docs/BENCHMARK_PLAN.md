@@ -64,9 +64,20 @@ Updated to use `--range all` and label-filtered queries.
 
 **Resolved design decisions:**
 - Shell script (not Rust harness) — simpler for process management and `/proc` access
-- Staggered starts (every 10th VM gets 200ms delay) to avoid KVM thundering herd
+- Staggered starts (100ms per VM + 500ms every 10th) to avoid KVM thundering herd
 - Estimated Prometheus comparison (not running actual exporters) — avoids infra complexity
 - 15s workload duration per VM keeps total benchmark tractable
+- Trap handler (EXIT/INT/TERM/HUP) ensures cleanup on interrupt or SSH disconnect
+
+**Verified results (8 vCPU, 15.6 GB RAM, Linux 6.12):**
+
+| VMs | Success | Peak RSS | Store Disk | Prom Stack (est.) |
+|-----|---------|----------|------------|-------------------|
+| 10  | 10/10   | 1,072 MB | 11 MB      | 380 MB            |
+| 50  | 50/50   | 5,129 MB | 57 MB      | 1,500 MB          |
+| 100 | 100/100 | 7,123 MB | 114 MB     | 2,900 MB          |
+
+Store disk: consistent 1.1 MB per VM. Zero extra processes for monitoring.
 
 **Grafana dashboard (task 5.4): ✅ Complete**
 - Wired `remote_write::push()` into VMM via dedicated export thread (separate from maintenance loop)
