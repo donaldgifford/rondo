@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["rondo", "rondo-cli"]
+members = ["rondo", "rondo-cli", "rondo-demo-vmm"]
 
 [workspace.package]
 edition = "2024"

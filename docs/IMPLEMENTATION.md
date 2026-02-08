@@ -162,9 +162,9 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 
 ### Tasks
 
-- [ ] **4.1** Set up `rondo-demo-vmm` crate with rust-vmm dependencies
-  - `kvm-ioctls`, `kvm-bindings`, `vm-memory`, `linux-loader`, `vm-superio`, `event-manager`
-  - Add crate to workspace members
+- [x] **4.1** Set up `rondo-demo-vmm` crate with rust-vmm dependencies
+  - `kvm-ioctls`, `kvm-bindings`, `vm-memory`, `linux-loader`, `vm-superio`, `event-manager` (cfg-gated to Linux)
+  - Added crate to workspace members, compiles on macOS with Linux deps gated
 - [ ] **4.2** Implement minimal VMM boot in `vmm.rs`
   - Create KVM VM, configure memory regions via `vm-memory`
   - Set up CPU ID, MSRs, special registers for x86_64 boot
@@ -176,10 +176,10 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 - [ ] **4.4** Add virtio-blk device in `devices/block.rs`
   - Backing file for guest disk I/O
   - Wire into event loop for async I/O completion
-- [ ] **4.5** Integrate rondo in `metrics.rs`
+- [x] **4.5** Integrate rondo in `metrics.rs`
   - Initialize `Store` with VMM metrics schema (1s/10m, 10s/6h, 5m/7d tiers)
-  - Register series for all VMM metrics (~20-30 series)
-  - Provide `VmMetrics` wrapper with typed `record_*` methods
+  - Registered 16 series across vCPU exits, virtio-blk I/O, and process stats
+  - `VmMetrics` wrapper with typed `record_vcpu_exit`, `record_blk_request`, `record_process_stats` methods
 - [ ] **4.6** Instrument vCPU exit handler
   - Record `vcpu_exits_total` by exit reason
   - Record `vcpu_exit_duration_ns` per exit

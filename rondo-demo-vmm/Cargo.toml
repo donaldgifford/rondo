@@ -1,0 +1,30 @@
+[package]
+name = "rondo-demo-vmm"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Minimal demo VMM with embedded rondo metrics"
+
+[dependencies]
+rondo = { path = "../rondo", features = ["prometheus-remote-write"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+
+# Linux-only KVM dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+kvm-ioctls = "0.19"
+kvm-bindings = "0.10"
+vm-memory = { version = "0.16", features = ["backend-mmap"] }
+linux-loader = { version = "0.12", features = ["bzimage", "elf"] }
+vm-superio = "0.8"
+event-manager = "0.4"
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[lints]
+workspace = true
