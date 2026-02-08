@@ -119,7 +119,14 @@ make vmm-check-kvm                # verify KVM availability
 
 **Important**: `vmm-run` and `vmm-build` do `rsync --delete` which removes guest build artifacts (`out/`). Rebuild the guest after sync with `make vmm-guest`, or use `make vmm-ssh CMD="..."` to avoid re-syncing.
 
-**Remote environment**: The remote box has Prometheus and Grafana available for integration testing (Benchmark B and dashboard work).
+**Remote environment**: The remote box pushes metrics to Prometheus via remote-write. Grafana dashboard is deployed via grafana-operator CRDs. See `deploy/README.md` for the full pipeline setup.
+
+## Monitoring / Deploy
+
+K8s manifests for the metrics pipeline live in `deploy/`:
+- `deploy/k8s/` — GrafanaDashboard CR + ConfigMap (apply with `kubectl apply -f deploy/k8s/`)
+- `deploy/grafana/` — Dashboard JSON source of truth
+- `deploy/README.md` — Setup guide
 
 ## Key Design Documents
 

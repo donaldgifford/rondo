@@ -18,7 +18,7 @@ VMM_KERNEL       := rondo-demo-vmm/guest/out/bzImage
 VMM_INITRAMFS    := rondo-demo-vmm/guest/out/initramfs.cpio
 
 # Default Prometheus remote-write endpoint on the remote box
-VMM_REMOTE_WRITE := http://localhost:9090/api/v1/write
+VMM_REMOTE_WRITE := https://prometheus.fartlab.dev/api/v1/write
 
 .PHONY: help build test clippy bench \
         vmm-sync vmm-build vmm-test vmm-clippy vmm-run vmm-bench vmm-shell \
