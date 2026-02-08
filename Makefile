@@ -17,9 +17,13 @@ VMM_CMDLINE_BASE := console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 noapic nots
 VMM_KERNEL       := rondo-demo-vmm/guest/out/bzImage
 VMM_INITRAMFS    := rondo-demo-vmm/guest/out/initramfs.cpio
 
+# Default Prometheus remote-write endpoint on the remote box
+VMM_REMOTE_WRITE := http://localhost:9090/api/v1/write
+
 .PHONY: help build test clippy bench \
         vmm-sync vmm-build vmm-test vmm-clippy vmm-run vmm-bench vmm-shell \
-        vmm-demo vmm-demo-query vmm-bench-15 vmm-bench-30 vmm-bench-45 \
+        vmm-demo vmm-demo-query vmm-demo-remote-write \
+        vmm-bench-15 vmm-bench-30 vmm-bench-45 \
         vmm-bench-capture clean
 
 # ─── Local (macOS) ─────────────────────────────────────────────────────
@@ -92,6 +96,20 @@ vmm-demo-query: ## Query metrics store on remote box (after vmm-demo)
 		cargo run -p rondo-cli -- info vmm_metrics && \
 		echo '' && echo '=== Series list ===' && \
 		cargo run -p rondo-cli -- info vmm_metrics 2>&1 | grep -E '^\s+-' || true"
+
+vmm-demo-remote-write: vmm-build ## Run VMM demo with Prometheus remote-write export
+	ssh $(VMM_HOST) "$(VMM_CARGO) && \
+		cd rondo-demo-vmm/guest && ./build.sh && cd $(VMM_DIR) && \
+		rm -rf vmm_metrics && \
+		cargo run -p rondo-demo-vmm -- \
+			--kernel $(VMM_KERNEL) \
+			--initramfs $(VMM_INITRAMFS) \
+			--cmdline '$(VMM_CMDLINE_BASE) workload_duration=45' \
+			--remote-write $(VMM_REMOTE_WRITE) && \
+		echo '' && echo '=== Post-run metrics store ===' && \
+		cargo run -p rondo-cli -- info vmm_metrics && \
+		echo '' && echo '=== Export cursor ===' && \
+		cat vmm_metrics/cursor_prometheus.json 2>/dev/null || echo '(no cursor — remote-write may not have pushed yet)'"
 
 vmm-ssh: ## Run arbitrary command on remote box (pass CMD=)
 	ssh $(VMM_HOST) "$(VMM_CARGO) && $(CMD)"

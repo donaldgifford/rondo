@@ -395,6 +395,74 @@ fn handle_io_in(port: u16, data: &mut [u8]) {
     }
 }
 
+// ── Export loop (remote-write) ──────────────────────────────────────
+
+/// Interval between remote-write pushes.
+const EXPORT_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Runs a periodic export loop: drain tier 0 → push to Prometheus remote-write.
+///
+/// This runs in its own thread and never returns (daemon thread).
+pub fn export_loop(
+    metrics: Arc<Mutex<VmMetrics>>,
+    endpoint: &str,
+    cursor_path: &std::path::Path,
+) {
+    use rondo::export::ExportCursor;
+    use rondo::remote_write::{push, RemoteWriteConfig};
+
+    let config = RemoteWriteConfig::new(endpoint);
+
+    let mut cursor = match ExportCursor::load_or_new(cursor_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("failed to load export cursor: {e}");
+            return;
+        }
+    };
+
+    tracing::info!("remote-write export loop started (interval: {EXPORT_INTERVAL:?})");
+
+    loop {
+        std::thread::sleep(EXPORT_INTERVAL);
+
+        // Drain and push under the metrics lock
+        let result = if let Ok(m) = metrics.lock() {
+            let store = m.store();
+            match store.drain(0, &mut cursor) {
+                Ok(exports) if exports.is_empty() => {
+                    tracing::debug!("remote-write: no new data to export");
+                    continue;
+                }
+                Ok(exports) => {
+                    let count = exports.len();
+                    match push(&config, &exports, store) {
+                        Ok(n) => {
+                            tracing::info!("remote-write: pushed {n} series ({count} with data)");
+                            Ok(())
+                        }
+                        Err(e) => Err(format!("push failed: {e}")),
+                    }
+                }
+                Err(e) => Err(format!("drain failed: {e}")),
+            }
+        } else {
+            Err("failed to acquire metrics lock".to_string())
+        };
+
+        match result {
+            Ok(()) => {
+                if let Err(e) = cursor.save() {
+                    tracing::warn!("remote-write: failed to save cursor: {e}");
+                }
+            }
+            Err(msg) => {
+                tracing::warn!("remote-write: {msg}");
+            }
+        }
+    }
+}
+
 // ── Maintenance loop ────────────────────────────────────────────────
 
 /// Runs a 1-second maintenance tick: consolidation + process metrics.

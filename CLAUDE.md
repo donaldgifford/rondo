@@ -105,6 +105,7 @@ make vmm-clippy                   # sync + clippy on remote
 make vmm-run ARGS="--kernel ..."  # sync + build + run VMM
 make vmm-demo                     # full demo: build + guest + run + query metrics
 make vmm-demo-query               # query metrics store from previous demo run
+make vmm-demo-remote-write        # demo with Prometheus remote-write export (45s workload)
 make vmm-guest                    # sync + build guest initramfs
 make vmm-bench                    # sync + run write-path benchmarks
 make vmm-bench-15                 # 15s VM lifecycle benchmark

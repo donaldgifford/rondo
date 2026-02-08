@@ -38,6 +38,8 @@ pub struct VmmConfig {
     pub metrics_store_path: PathBuf,
     /// HTTP API listen port.
     pub api_port: u16,
+    /// Prometheus remote-write endpoint URL (optional).
+    pub remote_write_endpoint: Option<String>,
 }
 
 /// VMM error type.
@@ -99,6 +101,8 @@ pub struct Vmm {
     guest_memory: GuestMemoryMmap,
     metrics: Arc<Mutex<VmMetrics>>,
     api_port: u16,
+    metrics_store_path: PathBuf,
+    remote_write_endpoint: Option<String>,
 }
 
 impl Vmm {
@@ -200,6 +204,8 @@ impl Vmm {
             guest_memory,
             metrics: Arc::new(Mutex::new(metrics)),
             api_port: config.api_port,
+            metrics_store_path: config.metrics_store_path,
+            remote_write_endpoint: config.remote_write_endpoint,
         })
     }
 
@@ -226,6 +232,20 @@ impl Vmm {
                 vcpu::maintenance_loop(maint_metrics);
             })
             .map_err(VmmError::Io)?;
+
+        // Spawn remote-write export thread (if configured)
+        if let Some(ref endpoint) = self.remote_write_endpoint {
+            let export_metrics = self.metrics.clone();
+            let cursor_path = self.metrics_store_path.join("cursor_prometheus.json");
+            let endpoint = endpoint.clone();
+            std::thread::Builder::new()
+                .name("remote-write".into())
+                .spawn(move || {
+                    vcpu::export_loop(export_metrics, &endpoint, &cursor_path);
+                })
+                .map_err(VmmError::Io)?;
+            tracing::info!("remote-write export thread started → {}", self.remote_write_endpoint.as_ref().unwrap());
+        }
 
         // Run vCPU loop in this thread (blocks)
         tracing::info!("starting vCPU");

@@ -52,7 +52,12 @@ Updated to use `--range all` and label-filtered queries.
 - **Storage characterization**: HDD vs SSD on remote box — need to measure baseline I/O latency to contextualize disk overhead numbers
 - **Comparison baseline**: For "traditional monitoring" comparison, need Prometheus node-exporter per VM + central scrape config
 
-**Grafana dashboard (task 5.4):** Integration path is to wire `remote_write::push()` into VMM maintenance loop → push to remote Prometheus → visualize in existing Grafana. The `rondo::remote_write` module is fully implemented with protobuf serialization, snappy compression, and retry logic but not yet wired into the VMM.
+**Grafana dashboard (task 5.4): ✅ Code complete**
+- Wired `remote_write::push()` into VMM via dedicated export thread (separate from maintenance loop)
+- `--remote-write <URL>` CLI flag enables periodic drain (every 10s) → push to Prometheus
+- Export cursor persisted to `cursor_prometheus.json` for incremental, at-most-once delivery
+- `make vmm-demo-remote-write` runs 45s workload with remote-write to local Prometheus
+- Remaining: start Prometheus + Grafana on remote box (10.10.11.33) and create dashboard
 
 ## Verified Results
 

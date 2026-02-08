@@ -49,6 +49,11 @@ struct Cli {
     /// Port for the HTTP metrics API.
     #[arg(long, default_value = "9100")]
     api_port: u16,
+
+    /// Prometheus remote-write endpoint URL (e.g., http://localhost:9090/api/v1/write).
+    /// When set, the VMM periodically pushes metrics to this endpoint.
+    #[arg(long)]
+    remote_write: Option<String>,
 }
 
 fn main() {
@@ -82,6 +87,7 @@ fn run_vmm(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         memory_mib: cli.memory_mib,
         metrics_store_path: cli.metrics_store,
         api_port: cli.api_port,
+        remote_write_endpoint: cli.remote_write,
     };
 
     let mut vmm = vmm::Vmm::new(config)?;
