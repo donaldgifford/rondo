@@ -36,7 +36,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Write cursor advancement with wraparound
   - Columnar layout: timestamp column + one f64 column per series
   - NaN sentinel for missing/unwritten slots
-- [ ] **1.4** Implement series registration in `rondo/src/series.rs`
+- [x] **1.4** Implement series registration in `rondo/src/series.rs`
   - `SeriesHandle` — opaque handle containing pre-computed column offset
   - Label set storage and matching against schema matchers
   - Series index persistence (`series_index.bin`)

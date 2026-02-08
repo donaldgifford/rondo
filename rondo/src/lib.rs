@@ -27,4 +27,5 @@
 pub mod error;
 pub mod ring;
 pub mod schema;
+pub mod series;
 pub mod slab;
