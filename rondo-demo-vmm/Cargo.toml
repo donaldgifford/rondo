@@ -10,18 +10,18 @@ description = "Minimal demo VMM with embedded rondo metrics"
 rondo = { path = "../rondo", features = ["prometheus-remote-write"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 
 # Linux-only KVM dependencies
+# Pin vm-memory to 0.15 for compatibility with linux-loader 0.12
 [target.'cfg(target_os = "linux")'.dependencies]
 kvm-ioctls = "0.19"
-kvm-bindings = "0.10"
-vm-memory = { version = "0.16", features = ["backend-mmap"] }
+kvm-bindings = { version = "0.10", features = ["fam-wrappers"] }
+vm-memory = { version = "0.15", features = ["backend-mmap"] }
 linux-loader = { version = "0.12", features = ["bzimage", "elf"] }
-vm-superio = "0.8"
-event-manager = "0.4"
 
 [dev-dependencies]
 tempfile = "3.8"

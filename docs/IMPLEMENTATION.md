@@ -165,14 +165,15 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 - [x] **4.1** Set up `rondo-demo-vmm` crate with rust-vmm dependencies
   - `kvm-ioctls`, `kvm-bindings`, `vm-memory`, `linux-loader`, `vm-superio`, `event-manager` (cfg-gated to Linux)
   - Added crate to workspace members, compiles on macOS with Linux deps gated
-- [ ] **4.2** Implement minimal VMM boot in `vmm.rs`
-  - Create KVM VM, configure memory regions via `vm-memory`
-  - Set up CPU ID, MSRs, special registers for x86_64 boot
-  - Load bzImage kernel via `linux-loader`
-  - Load initramfs into guest memory
-- [ ] **4.3** Implement vCPU thread in `vcpu.rs`
+- [x] **4.2** Implement minimal VMM boot in `vmm.rs`
+  - KVM VM creation, memory regions via `vm-memory` 0.15
+  - CPUID passthrough, identity-mapped page tables (2 MiB huge pages, 1 GiB)
+  - GDT with 64-bit code + data segments, special registers for long mode boot
+  - bzImage kernel loading via `linux-loader`, initramfs support
+  - E820 memory map, boot parameters (zero page) at 0x7000
+- [x] **4.3** Implement vCPU thread in `vcpu.rs`
   - KVM_RUN loop with exit handling (IO, MMIO, HLT, shutdown)
-  - Serial console output via `vm-superio`
+  - Direct serial console handling (COM1 0x3F8) without vm-superio
 - [ ] **4.4** Add virtio-blk device in `devices/block.rs`
   - Backing file for guest disk I/O
   - Wire into event loop for async I/O completion
@@ -180,25 +181,27 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - Initialize `Store` with VMM metrics schema (1s/10m, 10s/6h, 5m/7d tiers)
   - Registered 16 series across vCPU exits, virtio-blk I/O, and process stats
   - `VmMetrics` wrapper with typed `record_vcpu_exit`, `record_blk_request`, `record_process_stats` methods
-- [ ] **4.6** Instrument vCPU exit handler
-  - Record `vcpu_exits_total` by exit reason
-  - Record `vcpu_exit_duration_ns` per exit
-  - Record `vcpu_run_duration_ns` (time in KVM_RUN)
+- [x] **4.6** Instrument vCPU exit handler
+  - Records `vcpu_exits_total` by exit reason (IO, MMIO, HLT, shutdown, other)
+  - Records `vcpu_exit_duration_ns` per exit
+  - Records `vcpu_run_duration_ns` (time in KVM_RUN)
+  - Best-effort recording via `Arc<Mutex<VmMetrics>>`
 - [ ] **4.7** Instrument virtio-blk handler
   - Record `blk_requests_total` by operation type
   - Record `blk_request_duration_ns` per request
   - Record `blk_bytes_total` by direction
-- [ ] **4.8** Add VMM process metrics
-  - `vmm_rss_bytes` via `/proc/self/status`
-  - `vmm_open_fds` via `/proc/self/fd`
-  - `vmm_uptime_seconds`
-- [ ] **4.9** Add maintenance tick to event loop
-  - 1-second timer calling `store.consolidate()`
-  - Optional export on configurable interval
-- [ ] **4.10** Add HTTP query endpoint in `api.rs`
-  - `GET /metrics/query?series=...&start=...&end=...`
-  - `GET /metrics/health`
-  - `GET /metrics/info`
+- [x] **4.8** Add VMM process metrics
+  - `vmm_rss_bytes` via `/proc/self/status` (VmRSS parsing)
+  - `vmm_open_fds` via `/proc/self/fd` (directory entry counting)
+  - `vmm_uptime_seconds` via `Instant::now()` elapsed
+- [x] **4.9** Add maintenance tick
+  - 1-second maintenance thread calling `consolidate()` and `record_process_stats()`
+  - Runs as daemon thread, never blocks vCPU loop
+- [x] **4.10** Add HTTP query endpoint in `api.rs`
+  - `GET /metrics/query?series=...&start=...&end=...` (JSON response)
+  - `GET /metrics/health` (liveness check)
+  - `GET /metrics/info` (store metadata)
+  - Simple `std::net::TcpListener` — no external HTTP framework
 - [ ] **4.11** Build guest kernel and initramfs
   - Minimal kernel config: KVM guest, virtio drivers, no modules
   - BusyBox initramfs with synthetic workload (CPU bursts + disk I/O + idle periods)

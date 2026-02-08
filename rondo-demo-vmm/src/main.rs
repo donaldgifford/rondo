@@ -6,7 +6,7 @@
 //! **Requires Linux with KVM support.** On other platforms, build succeeds
 //! but the VMM cannot be started.
 
-#[allow(dead_code)] // Used by Linux VMM integration, not yet connected on macOS
+#[allow(dead_code)]
 mod metrics;
 
 #[cfg(target_os = "linux")]
@@ -74,10 +74,19 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
-fn run_vmm(_cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: Initialize metrics store
-    // TODO: Create VM, load kernel, configure vCPU
-    // TODO: Start event loop with metrics tick
-    // TODO: Start HTTP API
-    todo!("VMM implementation pending — see Phase 4 tasks 4.2-4.11")
+fn run_vmm(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    let config = vmm::VmmConfig {
+        kernel_path: cli.kernel,
+        initramfs_path: cli.initramfs,
+        cmdline: cli.cmdline,
+        memory_mib: cli.memory_mib,
+        metrics_store_path: cli.metrics_store,
+        api_port: cli.api_port,
+    };
+
+    let mut vmm = vmm::Vmm::new(config)?;
+    vmm.run()?;
+
+    tracing::info!("VMM exited cleanly");
+    Ok(())
 }
