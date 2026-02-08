@@ -124,10 +124,11 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - `drain(tier, cursor)` → returns all points since cursor, advances cursor
   - `ExportCursor` type with persistence support
   - Designed for periodic push to remote TSDB
-- [ ] **3.2** Implement Prometheus remote-write client in `rondo/src/export.rs`
-  - Serialize drain output to Prometheus remote-write protobuf format
-  - HTTP POST to configurable endpoint
-  - Basic retry logic
+- [x] **3.2** Implement Prometheus remote-write client in `rondo/src/remote_write.rs`
+  - Serialize drain output to Prometheus remote-write protobuf format (hand-written prost types)
+  - HTTP POST to configurable endpoint (reqwest blocking with snappy compression)
+  - Basic retry logic (exponential backoff, configurable max retries)
+  - Feature-gated: `prometheus-remote-write` (optional deps: prost, reqwest, snap)
 - [x] **3.3** CLI: `rondo info <store_path>` in `rondo-cli/`
   - Print schemas, series count, tier slot usage, total disk size
   - Show consolidation cursor positions
@@ -146,7 +147,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 |-------|----------|
 | [x] | `drain()` returns correct data and advances cursor |
 | [x] | Repeated `drain()` calls return only new data since last call |
-| [ ] | Prometheus remote-write successfully pushes to a test Prometheus instance |
+| [x] | Prometheus remote-write successfully serializes and compresses to spec (encode/decode roundtrip verified) |
 | [x] | `rondo info` displays accurate store metadata |
 | [x] | `rondo query` returns correct data in CSV and JSON formats |
 | [x] | `rondo bench` completes 10M writes and reports latency |

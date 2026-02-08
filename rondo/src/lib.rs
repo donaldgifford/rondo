@@ -79,6 +79,8 @@ pub mod consolidate;
 pub mod error;
 pub mod export;
 pub mod query;
+#[cfg(feature = "prometheus-remote-write")]
+pub mod remote_write;
 pub mod ring;
 pub mod schema;
 pub mod series;

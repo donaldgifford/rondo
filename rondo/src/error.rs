@@ -41,6 +41,11 @@ pub enum RondoError {
     /// Error during export/drain operations.
     #[error("export error: {0}")]
     Export(#[from] ExportError),
+
+    /// Error during remote write operations.
+    #[cfg(feature = "prometheus-remote-write")]
+    #[error("remote write error: {0}")]
+    RemoteWrite(#[from] RemoteWriteError),
 }
 
 /// Errors that can occur when opening or creating a store.
@@ -414,6 +419,61 @@ pub enum ExportError {
         /// The underlying JSON serialization error.
         #[source]
         source: serde_json::Error,
+    },
+}
+
+/// Errors that can occur during Prometheus remote-write operations.
+#[cfg(feature = "prometheus-remote-write")]
+#[derive(Error, Debug)]
+pub enum RemoteWriteError {
+    /// Failed to serialize `WriteRequest` to protobuf.
+    #[error("failed to serialize write request: {source}")]
+    Serialization {
+        /// The protobuf encoding error.
+        #[source]
+        source: prost::EncodeError,
+    },
+
+    /// Failed to compress data with Snappy.
+    #[error("failed to compress data: {source}")]
+    Compression {
+        /// The snappy compression error.
+        #[source]
+        source: snap::Error,
+    },
+
+    /// Failed to create HTTP client.
+    #[error("failed to create HTTP client: {source}")]
+    ClientCreate {
+        /// The underlying reqwest error.
+        #[source]
+        source: reqwest::Error,
+    },
+
+    /// HTTP request failed after retries.
+    #[error("HTTP request failed: {source}")]
+    RequestFailed {
+        /// The underlying reqwest error.
+        #[source]
+        source: reqwest::Error,
+    },
+
+    /// Server returned non-2xx status after retries.
+    #[error("server returned status {status}: {body}")]
+    HttpStatus {
+        /// The HTTP status code.
+        status: u16,
+        /// The response body text.
+        body: String,
+    },
+
+    /// Series handle not found in registry.
+    #[error("series not found for schema_index={schema_index} column={column}")]
+    SeriesNotFound {
+        /// The schema index.
+        schema_index: usize,
+        /// The column.
+        column: u32,
     },
 }
 
