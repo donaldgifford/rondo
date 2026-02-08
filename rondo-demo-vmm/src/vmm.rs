@@ -12,6 +12,7 @@ use linux_loader::loader::KernelLoader;
 use linux_loader::loader::bzimage::BzImage;
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 
+use crate::devices::block::VirtioBlock;
 use crate::metrics::VmMetrics;
 use crate::vcpu;
 
@@ -40,6 +41,8 @@ pub struct VmmConfig {
     pub api_port: u16,
     /// Prometheus remote-write endpoint URL (optional).
     pub remote_write_endpoint: Option<String>,
+    /// Path to the virtio-blk backing file (optional).
+    pub disk_path: Option<PathBuf>,
 }
 
 /// VMM error type.
@@ -94,21 +97,26 @@ impl From<rondo::RondoError> for VmmError {
 /// Owns the KVM VM, guest memory, vCPU, and metrics store.
 /// Call [`Vmm::run`] to start the vCPU loop and supporting threads.
 pub struct Vmm {
-    #[allow(dead_code)]
     vm_fd: VmFd,
     vcpu_fd: kvm_ioctls::VcpuFd,
-    #[allow(dead_code)]
     guest_memory: GuestMemoryMmap,
     metrics: Arc<Mutex<VmMetrics>>,
     api_port: u16,
     metrics_store_path: PathBuf,
     remote_write_endpoint: Option<String>,
+    block_device: Option<VirtioBlock>,
 }
 
 impl Vmm {
     /// Creates a new VMM: opens KVM, configures memory, loads the kernel,
     /// sets up the vCPU for 64-bit boot, and initializes the metrics store.
-    pub fn new(config: VmmConfig) -> Result<Self, VmmError> {
+    pub fn new(mut config: VmmConfig) -> Result<Self, VmmError> {
+        // Append virtio-mmio device announcement to cmdline if a disk is configured.
+        if config.disk_path.is_some() {
+            config.cmdline.push(' ');
+            config.cmdline.push_str(crate::devices::block::CMDLINE_PARAM);
+        }
+
         // 1. Open KVM
         let kvm = Kvm::new()?;
         tracing::info!("KVM API version: {}", kvm.get_api_version());
@@ -198,6 +206,12 @@ impl Vmm {
         let metrics = VmMetrics::open(&config.metrics_store_path)?;
         tracing::info!("metrics store opened at {:?}", config.metrics_store_path);
 
+        // 13. Create virtio-blk device (if disk path is configured)
+        let block_device = match config.disk_path {
+            Some(ref path) => Some(VirtioBlock::new(path)?),
+            None => None,
+        };
+
         Ok(Self {
             vm_fd,
             vcpu_fd,
@@ -206,6 +220,7 @@ impl Vmm {
             api_port: config.api_port,
             metrics_store_path: config.metrics_store_path,
             remote_write_endpoint: config.remote_write_endpoint,
+            block_device,
         })
     }
 
@@ -249,7 +264,13 @@ impl Vmm {
 
         // Run vCPU loop in this thread (blocks)
         tracing::info!("starting vCPU");
-        vcpu::run_vcpu_loop(&mut self.vcpu_fd, self.metrics.clone())
+        vcpu::run_vcpu_loop(
+            &mut self.vcpu_fd,
+            &self.vm_fd,
+            &self.guest_memory,
+            self.metrics.clone(),
+            self.block_device.as_mut(),
+        )
     }
 
     /// Loads an initramfs file into guest memory above the kernel.

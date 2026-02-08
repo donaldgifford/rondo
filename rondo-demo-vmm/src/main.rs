@@ -54,6 +54,12 @@ struct Cli {
     /// When set, the VMM periodically pushes metrics to this endpoint.
     #[arg(long)]
     remote_write: Option<String>,
+
+    /// Path to a backing file for the virtio-blk device.
+    /// If the file does not exist, it is created at 64 MiB.
+    /// When set, the guest sees a /dev/vda block device.
+    #[arg(long)]
+    disk: Option<std::path::PathBuf>,
 }
 
 fn main() {
@@ -88,6 +94,7 @@ fn run_vmm(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         metrics_store_path: cli.metrics_store,
         api_port: cli.api_port,
         remote_write_endpoint: cli.remote_write,
+        disk_path: cli.disk,
     };
 
     let mut vmm = vmm::Vmm::new(config)?;

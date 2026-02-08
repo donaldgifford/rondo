@@ -39,10 +39,20 @@ echo "[workload] phase 2: idle (${P2}s)"
 sleep "$P2"
 
 echo "[workload] phase 3: I/O simulation (${P3}s)"
-END=$(($(date +%s) + P3))
-while [ "$(date +%s)" -lt "$END" ]; do
-    dd if=/dev/zero of=/dev/null bs=4096 count=256 2>/dev/null
-done
+if [ -b /dev/vda ]; then
+    echo "[workload]   using /dev/vda (virtio-blk)"
+    END=$(($(date +%s) + P3))
+    while [ "$(date +%s)" -lt "$END" ]; do
+        # Read from block device, write to block device
+        dd if=/dev/vda of=/dev/null bs=4096 count=64 2>/dev/null
+        dd if=/dev/zero of=/dev/vda bs=4096 count=64 seek=128 2>/dev/null
+    done
+else
+    END=$(($(date +%s) + P3))
+    while [ "$(date +%s)" -lt "$END" ]; do
+        dd if=/dev/zero of=/dev/null bs=4096 count=256 2>/dev/null
+    done
+fi
 
 echo "[workload] phase 4: mixed (${P4}s)"
 END=$(($(date +%s) + P4))

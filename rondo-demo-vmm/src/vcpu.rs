@@ -9,10 +9,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use kvm_bindings::{kvm_dtable, kvm_regs, kvm_segment, KVM_MAX_CPUID_ENTRIES};
-use kvm_ioctls::{Kvm, VcpuExit, VcpuFd};
+use kvm_ioctls::{Kvm, VcpuExit, VcpuFd, VmFd};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 
-use crate::metrics::{VcpuExitReason, VmMetrics};
+use crate::devices::block::{self, VirtioBlock};
+use crate::metrics::{BlkOp, VcpuExitReason, VmMetrics};
 use crate::vmm::VmmError;
 
 // ── Memory addresses (must match vmm.rs layout) ────────────────────
@@ -245,9 +246,14 @@ const HALT_CONSECUTIVE_THRESHOLD: u32 = 3;
 /// Runs the KVM_RUN loop, handling vCPU exits and recording metrics.
 ///
 /// Blocks until the guest shuts down or an unrecoverable error occurs.
+/// When a `block_device` is provided, MMIO accesses to the virtio-mmio
+/// region are dispatched to it, and IRQs are injected via `vm_fd`.
 pub fn run_vcpu_loop(
     vcpu: &mut VcpuFd,
+    vm_fd: &VmFd,
+    guest_memory: &GuestMemoryMmap,
     metrics: Arc<Mutex<VmMetrics>>,
+    mut block_device: Option<&mut VirtioBlock>,
 ) -> Result<(), VmmError> {
     let mut exit_count: u64 = 0;
     let boot_start = Instant::now();
@@ -287,14 +293,45 @@ pub fn run_vcpu_loop(
                         handle_io_in(port, data);
                         VcpuExitReason::Io
                     }
-                    VcpuExit::MmioRead(_addr, data) => {
-                        // Return zeros for unmapped MMIO reads
-                        for b in data.iter_mut() {
-                            *b = 0;
+                    VcpuExit::MmioRead(addr, data) => {
+                        if let Some(ref blk) = block_device {
+                            if addr >= block::MMIO_BASE
+                                && addr < block::MMIO_BASE + block::MMIO_SIZE
+                            {
+                                blk.mmio_read(addr - block::MMIO_BASE, data);
+                            } else {
+                                for b in data.iter_mut() {
+                                    *b = 0;
+                                }
+                            }
+                        } else {
+                            for b in data.iter_mut() {
+                                *b = 0;
+                            }
                         }
                         VcpuExitReason::Mmio
                     }
-                    VcpuExit::MmioWrite(_addr, _data) => VcpuExitReason::Mmio,
+                    VcpuExit::MmioWrite(addr, data) => {
+                        if let Some(ref mut blk) = block_device {
+                            if addr >= block::MMIO_BASE
+                                && addr < block::MMIO_BASE + block::MMIO_SIZE
+                            {
+                                let write_result =
+                                    blk.mmio_write(addr - block::MMIO_BASE, data, guest_memory);
+                                if write_result.needs_interrupt {
+                                    // Edge-triggered: assert then deassert. The in-kernel
+                                    // PIC latches the IRQ on assertion.
+                                    let _ = vm_fd.set_irq_line(block::IRQ, true);
+                                    let _ = vm_fd.set_irq_line(block::IRQ, false);
+                                }
+                                // Record block I/O metrics.
+                                for io in &write_result.completed {
+                                    record_blk_io(&metrics, io);
+                                }
+                            }
+                        }
+                        VcpuExitReason::Mmio
+                    }
                     VcpuExit::Hlt => {
                         // Normal idle HLT — KVM resumes on next interrupt.
                         VcpuExitReason::Hlt
@@ -352,6 +389,23 @@ fn record_exit(
     if let Ok(mut m) = metrics.lock() {
         let ts = timestamp_ns();
         let _ = m.record_vcpu_exit(reason, exit_ns, run_ns, ts);
+    }
+}
+
+/// Records a completed block I/O operation as metrics (best-effort, never panics).
+fn record_blk_io(
+    metrics: &Arc<Mutex<VmMetrics>>,
+    io: &block::CompletedIo,
+) {
+    if let Ok(mut m) = metrics.lock() {
+        let ts = timestamp_ns();
+        let op = match io.op {
+            block::IoOp::Read => BlkOp::Read,
+            block::IoOp::Write => BlkOp::Write,
+            block::IoOp::Flush => BlkOp::Flush,
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let _ = m.record_blk_request(op, io.duration_ns as f64, io.bytes as f64, ts);
     }
 }
 

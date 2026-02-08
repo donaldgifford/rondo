@@ -56,6 +56,28 @@ cp "${SCRIPT_DIR}/init"        "${ROOTFS}/init"
 cp "${SCRIPT_DIR}/workload.sh" "${ROOTFS}/workload.sh"
 chmod +x "${ROOTFS}/init" "${ROOTFS}/workload.sh"
 
+# ── Virtio kernel modules (for virtio-blk support) ──────────────────
+# Copy and decompress virtio modules so the guest can load them with insmod.
+# If modules are built-in to the kernel, these won't exist and that's fine.
+KERNEL_VERSION="$(basename "${KERNEL}" | sed 's/vmlinuz-//')"
+MODULES_DIR="/lib/modules/${KERNEL_VERSION}"
+mkdir -p "${ROOTFS}/lib/modules"
+for mod in virtio virtio_ring virtio_mmio virtio_blk; do
+    modpath="$(find "${MODULES_DIR}" -name "${mod}.ko*" 2>/dev/null | head -1)"
+    if [ -n "${modpath}" ]; then
+        case "${modpath}" in
+            *.zst) zstd -d -q "${modpath}" -o "${ROOTFS}/lib/modules/${mod}.ko" 2>/dev/null ;;
+            *.xz)  xz -d -c "${modpath}" > "${ROOTFS}/lib/modules/${mod}.ko" 2>/dev/null ;;
+            *.gz)  gzip -d -c "${modpath}" > "${ROOTFS}/lib/modules/${mod}.ko" 2>/dev/null ;;
+            *)     cp "${modpath}" "${ROOTFS}/lib/modules/${mod}.ko" ;;
+        esac
+        echo "  module: ${mod} (from ${modpath})"
+    fi
+done
+
+# Add insmod symlink if not already present
+ln -sf busybox "${ROOTFS}/bin/insmod" 2>/dev/null || true
+
 cd "${ROOTFS}"
 # Sort entries for reproducibility; use --quiet to suppress byte count.
 # Using uncompressed cpio — kernel handles it natively without decompressor.

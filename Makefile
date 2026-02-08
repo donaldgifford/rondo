@@ -22,7 +22,7 @@ VMM_REMOTE_WRITE := https://prometheus.fartlab.dev/api/v1/write
 
 .PHONY: help build test clippy bench \
         vmm-sync vmm-build vmm-test vmm-clippy vmm-run vmm-bench vmm-shell \
-        vmm-demo vmm-demo-query vmm-demo-remote-write \
+        vmm-demo vmm-demo-disk vmm-demo-query vmm-demo-remote-write \
         vmm-bench-15 vmm-bench-30 vmm-bench-45 \
         vmm-bench-capture clean
 
@@ -91,6 +91,19 @@ vmm-demo: vmm-build ## Build guest, run VMM demo end-to-end, query metrics after
 		echo '' && echo '=== vCPU IO exits (tier 0) ===' && \
 		cargo run -p rondo-cli -- query vmm_metrics 'vcpu_exits_total{reason=io}' --range all --tier 0 --format csv | tail -20"
 
+vmm-demo-disk: vmm-build ## Run VMM demo with virtio-blk disk device
+	ssh $(VMM_HOST) "$(VMM_CARGO) && \
+		cd rondo-demo-vmm/guest && ./build.sh && cd $(VMM_DIR) && \
+		rm -rf vmm_metrics && \
+		cargo run -p rondo-demo-vmm -- \
+			--kernel $(VMM_KERNEL) \
+			--initramfs $(VMM_INITRAMFS) \
+			--disk vmm_disk.img && \
+		echo '' && echo '=== Post-run metrics store ===' && \
+		cargo run -p rondo-cli -- info vmm_metrics && \
+		echo '' && echo '=== Block I/O reads (tier 0) ===' && \
+		cargo run -q -p rondo-cli -- query vmm_metrics 'blk_requests_total{op=read}' --range all --tier 0 --format csv 2>/dev/null | tail -20"
+
 vmm-demo-query: ## Query metrics store on remote box (after vmm-demo)
 	ssh $(VMM_HOST) "$(VMM_CARGO) && \
 		cargo run -p rondo-cli -- info vmm_metrics && \
@@ -105,6 +118,7 @@ vmm-demo-remote-write: vmm-build ## Run VMM demo with Prometheus remote-write ex
 			--kernel $(VMM_KERNEL) \
 			--initramfs $(VMM_INITRAMFS) \
 			--cmdline '$(VMM_CMDLINE_BASE) workload_duration=45' \
+			--disk vmm_disk.img \
 			--remote-write $(VMM_REMOTE_WRITE) && \
 		echo '' && echo '=== Post-run metrics store ===' && \
 		cargo run -p rondo-cli -- info vmm_metrics && \

@@ -9,6 +9,13 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 
+# Load virtio kernel modules (ignore errors for built-in modules)
+for mod in virtio virtio_ring virtio_mmio virtio_blk; do
+    if [ -f "/lib/modules/${mod}.ko" ]; then
+        insmod "/lib/modules/${mod}.ko" 2>/dev/null || true
+    fi
+done
+
 # Parse workload_duration from kernel command line
 WORKLOAD_DURATION=18
 for param in $(cat /proc/cmdline); do
