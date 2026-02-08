@@ -75,6 +75,7 @@
 //! - [`query`] — Query result types and tier selection
 //! - [`error`] — Error types
 
+pub mod consolidate;
 pub mod error;
 pub mod query;
 pub mod ring;

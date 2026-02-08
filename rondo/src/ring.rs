@@ -299,19 +299,24 @@ impl RingBuffer {
             return None;
         }
 
+        let cursor = self.slab.write_cursor();
+        let slot_count = self.slab.slot_count();
+
         if self.has_wrapped {
-            // When wrapped, oldest is at the slot after the cursor
-            let cursor = self.slab.write_cursor();
-            let oldest_slot = (cursor + 1) % self.slab.slot_count();
-            let timestamp = self.slab.read_timestamp(oldest_slot);
-            if timestamp != 0 {
-                Some(timestamp)
-            } else {
-                None
+            // When wrapped, oldest data is after the cursor. Scan forward
+            // from cursor+1 to find the first non-zero timestamp (slots may
+            // be uninitialized if the buffer hasn't been fully filled).
+            for offset in 1..=slot_count {
+                let slot = (cursor + offset) % slot_count;
+                let timestamp = self.slab.read_timestamp(slot);
+                if timestamp != 0 {
+                    return Some(timestamp);
+                }
             }
+            None
         } else {
             // When not wrapped, find the first non-zero timestamp
-            for slot in 0..self.slab.slot_count() {
+            for slot in 0..slot_count {
                 let timestamp = self.slab.read_timestamp(slot);
                 if timestamp != 0 {
                     return Some(timestamp);

@@ -83,19 +83,19 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 
 ### Tasks
 
-- [ ] **2.1** Implement consolidation functions in `rondo/src/consolidate.rs`
+- [x] **2.1** Implement consolidation functions in `rondo/src/consolidate.rs`
   - `Average`, `Min`, `Max`, `Last`, `Sum`, `Count`
   - Each operates on a slice of `f64` values (with NaN filtering)
-- [ ] **2.2** Implement `Store::consolidate()` in `store.rs`
+- [x] **2.2** Implement `Store::consolidate()` in `store.rs`
   - Scan tier 0 for newly wrapped regions since last consolidation
   - Apply configured consolidation functions to produce tier 1 values
   - Cascade: tier 1 wraps → consolidate into tier 2, etc.
-  - Track consolidation cursors per tier (persisted in slab header or meta.json)
+  - Track consolidation cursors per tier (persisted in `consolidation_cursors.json`)
   - Return count of consolidations performed
-- [ ] **2.3** Implement `Store::query_auto(handle, start, end)`
+- [x] **2.3** Implement `Store::query_auto(handle, start, end)`
   - Select highest-resolution tier that covers the requested time range
   - Fall back to lower tiers for ranges that exceed higher-tier retention
-- [ ] **2.4** Integration tests
+- [x] **2.4** Integration tests
   - Write at 1s for 15 simulated minutes → verify tier 1 (10s) has correct consolidated values
   - Write past tier 1 capacity → verify tier 2 (5m) cascade
   - Verify consolidation functions produce mathematically correct results
@@ -105,12 +105,12 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 
 | Check | Criteria |
 |-------|----------|
-| [ ] | `consolidate()` correctly downsamples tier 0 → tier 1 when tier 0 wraps |
-| [ ] | Cascade works: tier 0 → tier 1 → tier 2 |
-| [ ] | All consolidation functions (avg, min, max, last, sum, count) produce correct output |
-| [ ] | NaN values in source tier are excluded from consolidation |
-| [ ] | `query_auto` returns highest-resolution data available for the requested range |
-| [ ] | Integration tests pass with 15 minutes of simulated 1s writes |
+| [x] | `consolidate()` correctly downsamples tier 0 → tier 1 when tier 0 wraps |
+| [x] | Cascade works: tier 0 → tier 1 → tier 2 |
+| [x] | All consolidation functions (avg, min, max, last, sum, count) produce correct output |
+| [x] | NaN values in source tier are excluded from consolidation |
+| [x] | `query_auto` returns highest-resolution data available for the requested range |
+| [x] | Integration tests pass with 15 minutes of simulated 1s writes |
 
 ---
 

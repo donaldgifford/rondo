@@ -33,6 +33,10 @@ pub enum RondoError {
     /// Error during slab I/O operations.
     #[error("slab I/O error: {0}")]
     SlabIo(#[from] SlabIoError),
+
+    /// Error during consolidation operations.
+    #[error("consolidation error: {0}")]
+    Consolidation(#[from] ConsolidationError),
 }
 
 /// Errors that can occur when opening or creating a store.
@@ -295,6 +299,75 @@ pub enum SlabIoError {
         length: u64,
         /// The actual slab size.
         slab_size: u64,
+    },
+}
+
+/// Errors that can occur during consolidation operations.
+#[derive(Error, Debug)]
+pub enum ConsolidationError {
+    /// Failed to load consolidation cursors from file.
+    #[error("failed to load consolidation cursors from '{path}': {source}")]
+    CursorLoad {
+        /// The cursor file path.
+        path: String,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to parse consolidation cursors from JSON.
+    #[error("failed to parse consolidation cursors from '{path}': {source}")]
+    CursorParse {
+        /// The cursor file path.
+        path: String,
+        /// The underlying JSON parsing error.
+        #[source]
+        source: serde_json::Error,
+    },
+
+    /// Failed to save consolidation cursors to file.
+    #[error("failed to save consolidation cursors to '{path}': {source}")]
+    CursorSave {
+        /// The cursor file path.
+        path: String,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Failed to serialize consolidation cursors to JSON.
+    #[error("failed to serialize consolidation cursors: {source}")]
+    CursorSerialize {
+        /// The underlying JSON serialization error.
+        #[source]
+        source: serde_json::Error,
+    },
+
+    /// Tier does not have a consolidation function configured.
+    #[error("tier {tier_index} in schema {schema_index} has no consolidation function")]
+    NoConsolidationFunction {
+        /// The schema index.
+        schema_index: usize,
+        /// The tier index missing consolidation function.
+        tier_index: usize,
+    },
+
+    /// Consolidation window processing failed.
+    #[error("failed to process consolidation window {start_timestamp}..{end_timestamp}: {reason}")]
+    WindowProcessingFailed {
+        /// Window start timestamp.
+        start_timestamp: u64,
+        /// Window end timestamp.
+        end_timestamp: u64,
+        /// Description of the failure.
+        reason: String,
+    },
+
+    /// Invalid consolidation configuration.
+    #[error("invalid consolidation configuration: {reason}")]
+    InvalidConfiguration {
+        /// Description of what's invalid.
+        reason: String,
     },
 }
 

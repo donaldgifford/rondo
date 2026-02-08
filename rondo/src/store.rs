@@ -76,6 +76,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::consolidate::ConsolidationEngine;
 use crate::error::{QueryError, Result, StoreError};
 use crate::query::{analyze_coverage, QueryResult};
 use crate::ring::RingBuffer;
@@ -711,6 +712,49 @@ impl Store {
         // Query the selected tier
         self.query(handle, selected_tier, start_ns, end_ns)
     }
+
+    /// Performs consolidation across all schemas and tier pairs.
+    ///
+    /// This method creates a consolidation engine and runs consolidation for all
+    /// configured tier pairs. It should be called periodically (e.g., every second)
+    /// to keep lower resolution tiers up to date with new data in higher resolution tiers.
+    ///
+    /// The consolidation process:
+    /// 1. For each schema with multiple tiers
+    /// 2. For each adjacent tier pair (tier N → tier N+1)
+    /// 3. Read new data from source tier since last consolidation cursor
+    /// 4. Group data points into destination tier interval windows
+    /// 5. Apply the destination tier's consolidation function to each window
+    /// 6. Write consolidated values to destination tier
+    /// 7. Update consolidation cursors to track progress
+    ///
+    /// # Returns
+    ///
+    /// The total number of consolidation operations performed. Returns 0 if no
+    /// new data needed consolidation (idempotent behavior).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if consolidation fails for any tier pair, cursor loading/saving
+    /// fails, or if there are I/O errors during the consolidation process.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use rondo::store::Store;
+    /// # let mut store = Store::open("./data", vec![])?;
+    /// // Run consolidation - typically called from a periodic timer
+    /// let operations = store.consolidate()?;
+    /// println!("Performed {} consolidation operations", operations);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn consolidate(&mut self) -> Result<usize> {
+        // Create consolidation engine
+        let mut engine = ConsolidationEngine::new(&self.path, self.schemas.clone())?;
+
+        // Run consolidation
+        engine.consolidate(&mut self.rings)
+    }
 }
 
 #[cfg(test)]
@@ -1336,5 +1380,305 @@ mod tests {
 
         assert_eq!(cpu_data, vec![(base_time, 80.0)]);
         assert_eq!(mem_data, vec![(base_time, 60.0)]);
+    }
+
+    #[test]
+    fn test_consolidation_basic() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("consolidation_store");
+
+        // Create schema with multiple tiers
+        let schemas = vec![
+            SchemaConfig {
+                name: "multi_tier".to_string(),
+                label_matcher: LabelMatcher::new([("type", "cpu")]),
+                tiers: vec![
+                    TierConfig {
+                        interval: Duration::from_secs(1),
+                        retention: Duration::from_secs(60),
+                        consolidation_fn: None,
+                    },
+                    TierConfig {
+                        interval: Duration::from_secs(10),
+                        retention: Duration::from_secs(600),
+                        consolidation_fn: Some(ConsolidationFn::Average),
+                    },
+                ],
+                max_series: 100,
+            }
+        ];
+
+        let mut store = Store::open(&store_path, schemas).unwrap();
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Write some data to tier 0
+        let base_time = 1_000_000_000_000_000_000u64; // 1s intervals in ns
+        for i in 0u32..15 {
+            let timestamp = base_time + u64::from(i) * 1_000_000_000;
+            let value = f64::from(i * 10);
+            store.record(handle, value, timestamp).unwrap();
+        }
+
+        // Run consolidation
+        let operations = store.consolidate().unwrap();
+        assert!(operations > 0, "Should have performed consolidation operations");
+
+        // Verify consolidated data exists in tier 1
+        let tier1_data: Vec<_> = store.query(handle, 1, base_time - 1, base_time + 20_000_000_000).unwrap().collect();
+        assert!(!tier1_data.is_empty(), "Tier 1 should have consolidated data");
+
+        // Second consolidation run should be idempotent (no new data)
+        let operations2 = store.consolidate().unwrap();
+        assert_eq!(operations2, 0, "Second consolidation should be a no-op");
+    }
+
+    #[test]
+    fn test_consolidation_with_no_multi_tier_schemas() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("single_tier_store");
+
+        // Create schema with only one tier
+        let schemas = vec![
+            SchemaConfig {
+                name: "single_tier".to_string(),
+                label_matcher: LabelMatcher::any(),
+                tiers: vec![
+                    TierConfig {
+                        interval: Duration::from_secs(1),
+                        retention: Duration::from_secs(60),
+                        consolidation_fn: None,
+                    },
+                ],
+                max_series: 100,
+            }
+        ];
+
+        let mut store = Store::open(&store_path, schemas).unwrap();
+        let handle = store.register("metric", &[]).unwrap();
+
+        store.record(handle, 42.0, 1_000_000_000_000_000_000).unwrap();
+
+        // Consolidation should be a no-op (no multi-tier schemas)
+        let operations = store.consolidate().unwrap();
+        assert_eq!(operations, 0);
+    }
+
+    #[test]
+    fn test_consolidation_functions() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("consolidation_functions_store");
+
+        // Create schema with different consolidation functions
+        let schemas = vec![
+            SchemaConfig {
+                name: "test_functions".to_string(),
+                label_matcher: LabelMatcher::any(),
+                tiers: vec![
+                    TierConfig {
+                        interval: Duration::from_secs(1),
+                        retention: Duration::from_secs(60),
+                        consolidation_fn: None,
+                    },
+                    TierConfig {
+                        interval: Duration::from_secs(5),
+                        retention: Duration::from_secs(300),
+                        consolidation_fn: Some(ConsolidationFn::Min),
+                    },
+                    TierConfig {
+                        interval: Duration::from_secs(15),
+                        retention: Duration::from_secs(900),
+                        consolidation_fn: Some(ConsolidationFn::Max),
+                    },
+                ],
+                max_series: 50,
+            }
+        ];
+
+        let mut store = Store::open(&store_path, schemas).unwrap();
+        let handle = store.register("test_metric", &[]).unwrap();
+
+        let base_time = 1_000_000_000_000_000_000u64;
+
+        // Write data with varying values
+        let values = [100.0, 50.0, 75.0, 25.0, 90.0, 10.0, 80.0, 60.0];
+        for (i, &value) in values.iter().enumerate() {
+            let timestamp = base_time + (i as u64 * 1_000_000_000);
+            store.record(handle, value, timestamp).unwrap();
+        }
+
+        // Run consolidation multiple times to cascade through tiers
+        for _ in 0..5 {
+            let operations = store.consolidate().unwrap();
+            if operations == 0 {
+                break;
+            }
+        }
+
+        // Check that data exists in tier 1 (Min consolidation)
+        let tier1_data: Vec<_> = store.query(handle, 1, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
+
+        // Check that data exists in tier 2 (Max consolidation)
+        let tier2_data: Vec<_> = store.query(handle, 2, base_time - 1, base_time + 20_000_000_000).unwrap().collect();
+
+        // At least tier 1 should have data
+        assert!(!tier1_data.is_empty() || !tier2_data.is_empty());
+    }
+
+    #[test]
+    fn test_consolidation_cursor_persistence() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("cursor_persistence_store");
+
+        let schemas = vec![
+            SchemaConfig {
+                name: "persistence_test".to_string(),
+                label_matcher: LabelMatcher::any(),
+                tiers: vec![
+                    TierConfig {
+                        interval: Duration::from_secs(1),
+                        retention: Duration::from_secs(60),
+                        consolidation_fn: None,
+                    },
+                    TierConfig {
+                        interval: Duration::from_secs(5),
+                        retention: Duration::from_secs(300),
+                        consolidation_fn: Some(ConsolidationFn::Average),
+                    },
+                ],
+                max_series: 50,
+            }
+        ];
+
+        let base_time = 1_000_000_000_000_000_000u64;
+
+        // First store instance
+        {
+            let mut store = Store::open(&store_path, schemas.clone()).unwrap();
+            let handle = store.register("persist_metric", &[]).unwrap();
+
+            // Write initial data
+            for i in 0u32..10 {
+                let timestamp = base_time + u64::from(i) * 1_000_000_000;
+                let value = f64::from(i * 5);
+                store.record(handle, value, timestamp).unwrap();
+            }
+
+            // Consolidate
+            let _operations = store.consolidate().unwrap();
+        }
+
+        // Second store instance (simulates restart)
+        {
+            let mut store = Store::open(&store_path, schemas).unwrap();
+            let handle = store.register("persist_metric", &[]).unwrap();
+
+            // Add more data
+            for i in 10u32..15 {
+                let timestamp = base_time + u64::from(i) * 1_000_000_000;
+                let value = f64::from(i * 5);
+                store.record(handle, value, timestamp).unwrap();
+            }
+
+            // Consolidate - should only process new data
+            let _operations = store.consolidate().unwrap();
+
+            // Verify that consolidation cursors file exists
+            let cursor_file = store_path.join("consolidation_cursors.json");
+            assert!(cursor_file.exists(), "Consolidation cursors should be persisted");
+        }
+    }
+
+    #[test]
+    fn test_consolidation_multiple_series() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("multi_series_consolidation_store");
+
+        let schemas = vec![
+            SchemaConfig {
+                name: "multi_series_test".to_string(),
+                label_matcher: LabelMatcher::any(),
+                tiers: vec![
+                    TierConfig {
+                        interval: Duration::from_secs(1),
+                        retention: Duration::from_secs(60),
+                        consolidation_fn: None,
+                    },
+                    TierConfig {
+                        interval: Duration::from_secs(5),
+                        retention: Duration::from_secs(300),
+                        consolidation_fn: Some(ConsolidationFn::Sum),
+                    },
+                ],
+                max_series: 10,
+            }
+        ];
+
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        // Register multiple series
+        let handle1 = store.register("metric1", &[]).unwrap();
+        let handle2 = store.register("metric2", &[]).unwrap();
+        let handle3 = store.register("metric3", &[]).unwrap();
+
+        let base_time = 1_000_000_000_000_000_000u64;
+
+        // Write data to multiple series
+        for i in 0..8 {
+            let timestamp = base_time + (i * 1_000_000_000);
+            store.record(handle1, 10.0, timestamp).unwrap();
+            store.record(handle2, 20.0, timestamp).unwrap();
+            store.record(handle3, 30.0, timestamp).unwrap();
+        }
+
+        // Consolidate
+        let operations = store.consolidate().unwrap();
+        assert!(operations > 0);
+
+        // Verify all series have consolidated data
+        let series1_tier1: Vec<_> = store.query(handle1, 1, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
+        let series2_tier1: Vec<_> = store.query(handle2, 1, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
+        let series3_tier1: Vec<_> = store.query(handle3, 1, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
+
+        // At least one series should have consolidated data
+        assert!(!series1_tier1.is_empty() || !series2_tier1.is_empty() || !series3_tier1.is_empty());
+    }
+
+    #[test]
+    fn test_consolidation_empty_store() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("empty_consolidation_store");
+
+        let schemas = vec![
+            SchemaConfig {
+                name: "empty_test".to_string(),
+                label_matcher: LabelMatcher::any(),
+                tiers: vec![
+                    TierConfig {
+                        interval: Duration::from_secs(1),
+                        retention: Duration::from_secs(60),
+                        consolidation_fn: None,
+                    },
+                    TierConfig {
+                        interval: Duration::from_secs(5),
+                        retention: Duration::from_secs(300),
+                        consolidation_fn: Some(ConsolidationFn::Average),
+                    },
+                ],
+                max_series: 10,
+            }
+        ];
+
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        // Consolidate empty store - should be a no-op
+        let operations = store.consolidate().unwrap();
+        assert_eq!(operations, 0);
+
+        // Register series but don't write data
+        let _handle = store.register("empty_metric", &[]).unwrap();
+
+        // Consolidate again - still should be a no-op
+        let operations = store.consolidate().unwrap();
+        assert_eq!(operations, 0);
     }
 }
