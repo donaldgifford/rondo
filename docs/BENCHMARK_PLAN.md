@@ -42,15 +42,31 @@ The VMM demo runs end-to-end but `rondo-cli query` returns 0 points (the `--rang
 
 Updated to use `--range all` and label-filtered queries.
 
-### 5. Scale benchmark investigation (Benchmark B) — PLANNED
+### 5. Scale benchmark (Benchmark B) ✅
 
-**Remote environment:** The remote box (10.10.11.33) has Prometheus and Grafana available.
+**File:** `scripts/benchmark_scale.sh`
 
-**Open questions for Benchmark B (resource overhead at scale):**
-- **Orchestration**: Is a shell script sufficient for spawning 10-100 VMM instances, or do we need dedicated tooling (e.g., a Rust harness)?
-- **Resource measurement**: How to reliably measure per-VMM CPU%, memory, disk I/O? `/proc/[pid]/stat` + `/proc/[pid]/io` vs external monitoring?
-- **Storage characterization**: HDD vs SSD on remote box — need to measure baseline I/O latency to contextualize disk overhead numbers
-- **Comparison baseline**: For "traditional monitoring" comparison, need Prometheus node-exporter per VM + central scrape config
+**Approach:** Shell script orchestration on the remote Linux box (10.10.11.33).
+
+**What it does:**
+1. Pre-flight checks: verifies KVM, kernel, initramfs, VMM binary
+2. For each count (10, 50, 100): spawns N concurrent `rondo-demo-vmm` instances
+3. Each VMM gets a unique `--metrics-store` dir and `--api-port`
+4. Background sampler reads `/proc/PID/status` (VmRSS) and `/proc/PID/stat` (CPU ticks) every 2s
+5. After VMMs exit (workload completes), analyzes peak RSS, CPU time, FD count
+6. Estimates Prometheus + node-exporter stack overhead for comparison:
+   - 25 MB RSS per node-exporter instance
+   - 100 MB base + 3 MB per target for Prometheus server
+   - 50 kB network per scrape at 15s interval
+7. Outputs comparison table with memory ratio
+
+**Make target:** `make vmm-bench-scale` (syncs source, builds release, runs script)
+
+**Resolved design decisions:**
+- Shell script (not Rust harness) — simpler for process management and `/proc` access
+- Staggered starts (every 10th VM gets 200ms delay) to avoid KVM thundering herd
+- Estimated Prometheus comparison (not running actual exporters) — avoids infra complexity
+- 15s workload duration per VM keeps total benchmark tractable
 
 **Grafana dashboard (task 5.4): ✅ Complete**
 - Wired `remote_write::push()` into VMM via dedicated export thread (separate from maintenance loop)
