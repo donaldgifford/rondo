@@ -1,115 +1,60 @@
 #!/usr/bin/env bash
-# Build a minimal guest kernel and BusyBox initramfs for rondo-demo-vmm.
+# Build a minimal initramfs for rondo-demo-vmm using the host kernel and busybox.
 #
 # Usage:
-#   ./build.sh                # build both kernel and initramfs
-#   ./build.sh kernel         # build kernel only
-#   ./build.sh initramfs      # build initramfs only
+#   ./build.sh              # build initramfs, symlink host kernel
 #
-# Prerequisites (Ubuntu/Debian):
-#   sudo apt install build-essential flex bison bc libelf-dev libssl-dev \
-#                    cpio wget
+# Prerequisites: busybox installed (apt install busybox-static)
 #
 # Output:
-#   out/bzImage        — kernel image
-#   out/initramfs.cpio — compressed initramfs
+#   out/bzImage            — symlink to host kernel
+#   out/initramfs.cpio.gz  — minimal initramfs with workload
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/build"
 OUT_DIR="${SCRIPT_DIR}/out"
+ROOTFS="${SCRIPT_DIR}/build/rootfs"
 
-KERNEL_VERSION="${KERNEL_VERSION:-6.6.70}"
-KERNEL_URL="https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz"
+KERNEL="$(ls /boot/vmlinuz-* 2>/dev/null | sort -V | tail -1)"
+BUSYBOX="$(which busybox 2>/dev/null || echo /usr/bin/busybox)"
 
-BUSYBOX_VERSION="${BUSYBOX_VERSION:-1.36.1}"
-BUSYBOX_URL="https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2"
+if [ -z "${KERNEL}" ]; then
+    echo "error: no kernel found in /boot/vmlinuz-*" >&2
+    exit 1
+fi
+if [ ! -x "${BUSYBOX}" ]; then
+    echo "error: busybox not found — install with: apt install busybox-static" >&2
+    exit 1
+fi
 
-NPROC="$(nproc 2>/dev/null || echo 4)"
+mkdir -p "${OUT_DIR}"
 
-mkdir -p "${BUILD_DIR}" "${OUT_DIR}"
-
-# ── Kernel ───────────────────────────────────────────────────────────
-
-build_kernel() {
-    local src="${BUILD_DIR}/linux-${KERNEL_VERSION}"
-
-    if [ ! -d "${src}" ]; then
-        echo "==> Downloading kernel ${KERNEL_VERSION}..."
-        wget -qO- "${KERNEL_URL}" | tar -xJ -C "${BUILD_DIR}"
-    fi
-
-    echo "==> Configuring kernel..."
-    cd "${src}"
-
-    # Start with a minimal KVM guest config
-    make defconfig
-    # Apply our overrides for a tiny, fast-booting guest
-    "${SCRIPT_DIR}/kernel-config.sh" .config
-
-    echo "==> Building kernel (${NPROC} jobs)..."
-    make -j"${NPROC}" bzImage
-
-    cp arch/x86/boot/bzImage "${OUT_DIR}/bzImage"
-    echo "==> Kernel built: ${OUT_DIR}/bzImage"
-}
+# ── Kernel — just symlink the host's ─────────────────────────────────
+ln -sf "${KERNEL}" "${OUT_DIR}/bzImage"
+echo "kernel: ${KERNEL}"
 
 # ── Initramfs ────────────────────────────────────────────────────────
+echo "building initramfs..."
+rm -rf "${ROOTFS}"
+mkdir -p "${ROOTFS}"/{bin,sbin,etc,proc,sys,dev,tmp}
 
-build_initramfs() {
-    local src="${BUILD_DIR}/busybox-${BUSYBOX_VERSION}"
-    local rootfs="${BUILD_DIR}/rootfs"
+cp "${BUSYBOX}" "${ROOTFS}/bin/busybox"
+for cmd in sh ash cat echo ls mkdir mount umount sleep date \
+           dmesg poweroff reboot dd; do
+    ln -sf busybox "${ROOTFS}/bin/${cmd}"
+done
 
-    if [ ! -d "${src}" ]; then
-        echo "==> Downloading BusyBox ${BUSYBOX_VERSION}..."
-        wget -qO- "${BUSYBOX_URL}" | tar -xj -C "${BUILD_DIR}"
-    fi
+cp "${SCRIPT_DIR}/init"        "${ROOTFS}/init"
+cp "${SCRIPT_DIR}/workload.sh" "${ROOTFS}/workload.sh"
+chmod +x "${ROOTFS}/init" "${ROOTFS}/workload.sh"
 
-    echo "==> Building BusyBox (static)..."
-    cd "${src}"
-    make defconfig
-    # Enable static linking
-    sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
-    make -j"${NPROC}"
+cd "${ROOTFS}"
+find . | cpio -o -H newc 2>/dev/null | gzip > "${OUT_DIR}/initramfs.cpio.gz"
 
-    echo "==> Creating initramfs rootfs..."
-    rm -rf "${rootfs}"
-    mkdir -p "${rootfs}"/{bin,sbin,etc,proc,sys,dev,tmp}
-
-    cp "${src}/busybox" "${rootfs}/bin/busybox"
-    # Create symlinks for common commands
-    for cmd in sh ash cat echo ls mkdir mount umount sleep date \
-               dmesg poweroff reboot dd; do
-        ln -sf busybox "${rootfs}/bin/${cmd}"
-    done
-
-    # Copy our init script
-    cp "${SCRIPT_DIR}/init" "${rootfs}/init"
-    chmod +x "${rootfs}/init"
-
-    # Copy the workload script
-    cp "${SCRIPT_DIR}/workload.sh" "${rootfs}/workload.sh"
-    chmod +x "${rootfs}/workload.sh"
-
-    echo "==> Packing initramfs..."
-    cd "${rootfs}"
-    find . | cpio -o -H newc 2>/dev/null | gzip > "${OUT_DIR}/initramfs.cpio.gz"
-    echo "==> Initramfs built: ${OUT_DIR}/initramfs.cpio.gz"
-}
-
-# ── Main ─────────────────────────────────────────────────────────────
-
-case "${1:-all}" in
-    kernel)    build_kernel ;;
-    initramfs) build_initramfs ;;
-    all)       build_kernel; build_initramfs ;;
-    *)         echo "Usage: $0 [kernel|initramfs|all]"; exit 1 ;;
-esac
-
-echo "==> Done."
+echo "initramfs: ${OUT_DIR}/initramfs.cpio.gz"
 echo ""
-echo "Run the VMM with:"
+echo "Run with:"
 echo "  cargo run -p rondo-demo-vmm -- \\"
 echo "    --kernel ${OUT_DIR}/bzImage \\"
 echo "    --initramfs ${OUT_DIR}/initramfs.cpio.gz"

@@ -203,9 +203,8 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - `GET /metrics/info` (store metadata)
   - Simple `std::net::TcpListener` — no external HTTP framework
 - [x] **4.11** Build guest kernel and initramfs
-  - `guest/build.sh`: downloads and builds Linux kernel (6.6.70) with KVM guest config
-  - `guest/kernel-config.sh`: minimal config overrides (serial, virtio, no modules/USB/sound)
-  - BusyBox 1.36.1 initramfs (statically linked) with synthetic workload
+  - `guest/build.sh`: symlinks host kernel, builds initramfs from host busybox
+  - `guest/init`: minimal init (mount filesystems, run workload, poweroff)
   - `guest/workload.sh`: 4-phase workload (CPU burst, idle, I/O simulation, mixed)
   - `make vmm-guest` builds on remote Linux box
 
