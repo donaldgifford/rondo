@@ -39,7 +39,7 @@ struct Cli {
     metrics_store: PathBuf,
 
     /// Kernel command line arguments.
-    #[arg(long, default_value = "console=ttyS0 reboot=k panic=1")]
+    #[arg(long, default_value = "console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 noapic notsc clocksource=jiffies lpj=1000000 rdinit=/init")]
     cmdline: String,
 
     /// Guest memory size in MiB.

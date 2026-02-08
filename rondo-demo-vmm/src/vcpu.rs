@@ -27,8 +27,8 @@ const PML4_ADDR: u64 = 0x9000;
 const PDPT_ADDR: u64 = 0xA000;
 /// PD (Level 2, 2 MB pages) address.
 const PD_ADDR: u64 = 0xB000;
-/// Initial kernel stack pointer.
-const BOOT_STACK_ADDR: u64 = BOOT_PARAMS_ADDR;
+/// Initial kernel stack pointer (below page tables at 0x9000, above boot_params).
+const BOOT_STACK_ADDR: u64 = 0x8FF0;
 
 // ── Serial console constants ────────────────────────────────────────
 
@@ -206,6 +206,42 @@ fn timestamp_ns() -> u64 {
     dur.as_secs() * 1_000_000_000 + u64::from(dur.subsec_nanos())
 }
 
+/// Sets up a periodic SIGALRM to interrupt KVM_RUN (so we can detect
+/// when the guest halts with interrupts disabled).
+fn setup_vcpu_timer() {
+    // SAFETY: setting a simple signal handler + timer.
+    unsafe {
+        // Install a no-op SIGALRM handler (just needs to interrupt KVM_RUN)
+        libc::signal(libc::SIGALRM, noop_handler as *const () as libc::sighandler_t);
+
+        // Fire SIGALRM every 1 second
+        let timer = libc::itimerval {
+            it_interval: libc::timeval { tv_sec: 1, tv_usec: 0 },
+            it_value: libc::timeval { tv_sec: 1, tv_usec: 0 },
+        };
+        libc::setitimer(libc::ITIMER_REAL, &timer, std::ptr::null_mut());
+    }
+}
+
+extern "C" fn noop_handler(_sig: libc::c_int) {
+    // Intentionally empty — just needs to interrupt KVM_RUN.
+}
+
+/// Checks if the guest vCPU is halted with interrupts disabled (IF=0).
+fn is_guest_halted(vcpu: &VcpuFd) -> bool {
+    if let Ok(regs) = vcpu.get_regs() {
+        regs.rflags & 0x200 == 0
+    } else {
+        false
+    }
+}
+
+/// Number of consecutive halt detections required before declaring the guest
+/// truly halted. A single IF=0 sample can be a transient state (kernel in a
+/// critical section with interrupts disabled). Requiring multiple consecutive
+/// checks avoids false positives during normal boot.
+const HALT_CONSECUTIVE_THRESHOLD: u32 = 3;
+
 /// Runs the KVM_RUN loop, handling vCPU exits and recording metrics.
 ///
 /// Blocks until the guest shuts down or an unrecoverable error occurs.
@@ -213,6 +249,13 @@ pub fn run_vcpu_loop(
     vcpu: &mut VcpuFd,
     metrics: Arc<Mutex<VmMetrics>>,
 ) -> Result<(), VmmError> {
+    let mut exit_count: u64 = 0;
+    let boot_start = Instant::now();
+    let mut consecutive_halt_checks: u32 = 0;
+
+    // Set up periodic SIGALRM to interrupt KVM_RUN when guest halts
+    setup_vcpu_timer();
+
     loop {
         let run_start = Instant::now();
 
@@ -220,6 +263,20 @@ pub fn run_vcpu_loop(
             Ok(exit) => {
                 let exit_start = Instant::now();
                 let run_ns = run_start.elapsed().as_secs_f64() * 1e9;
+                exit_count += 1;
+
+                // Any successful KVM_RUN means the guest is still active.
+                consecutive_halt_checks = 0;
+
+                // Periodic debug: log exit stats every 1M exits
+                if exit_count.is_multiple_of(1_000_000) {
+                    let elapsed = boot_start.elapsed().as_secs_f64();
+                    #[allow(clippy::cast_precision_loss)]
+                    let rate = exit_count as f64 / elapsed;
+                    tracing::debug!(
+                        "exit #{exit_count} at {elapsed:.1}s ({rate:.0} exits/s)",
+                    );
+                }
 
                 let reason = match exit {
                     VcpuExit::IoOut(port, data) => {
@@ -239,16 +296,8 @@ pub fn run_vcpu_loop(
                     }
                     VcpuExit::MmioWrite(_addr, _data) => VcpuExitReason::Mmio,
                     VcpuExit::Hlt => {
-                        // Guest executed HLT — if interrupts are disabled this
-                        // means the guest is done. Otherwise, just wait briefly.
-                        tracing::info!("guest halted");
-                        record_exit(
-                            &metrics,
-                            VcpuExitReason::Hlt,
-                            exit_start.elapsed().as_secs_f64() * 1e9,
-                            run_ns,
-                        );
-                        return Ok(());
+                        // Normal idle HLT — KVM resumes on next interrupt.
+                        VcpuExitReason::Hlt
                     }
                     VcpuExit::Shutdown => {
                         tracing::info!("guest shutdown");
@@ -267,8 +316,24 @@ pub fn run_vcpu_loop(
                 record_exit(&metrics, reason, exit_ns, run_ns);
             }
             Err(e) => {
-                // EINTR (errno 4): a signal interrupted KVM_RUN — retry
+                // EINTR (errno 4): a signal interrupted KVM_RUN.
+                // Check if guest is halted with interrupts disabled.
                 if e.errno() == 4 {
+                    if is_guest_halted(vcpu) {
+                        consecutive_halt_checks += 1;
+                        if consecutive_halt_checks >= HALT_CONSECUTIVE_THRESHOLD {
+                            tracing::info!(
+                                "guest halted (IF=0 detected {consecutive_halt_checks} \
+                                 consecutive times)"
+                            );
+                            return Ok(());
+                        }
+                        tracing::debug!(
+                            "halt check {consecutive_halt_checks}/{HALT_CONSECUTIVE_THRESHOLD}"
+                        );
+                    } else {
+                        consecutive_halt_checks = 0;
+                    }
                     continue;
                 }
                 return Err(VmmError::Kvm(e));
@@ -298,14 +363,30 @@ fn handle_io_out(port: u16, data: &[u8]) {
         let _ = lock.write_all(data);
         let _ = lock.flush();
     }
-    // Silently ignore writes to other serial registers and ports.
+    // All other port writes are silently ignored.
 }
 
-/// Handles an IO-port read from the guest (serial status).
+/// Port 0x61: system control port B (speaker / PIT channel 2 gate).
+const SYSTEM_CTRL_PORT_B: u16 = 0x61;
+/// PCI configuration data port (0xCFC–0xCFF).
+const PCI_CONFIG_DATA: u16 = 0xCFC;
+
+/// Handles an IO-port read from the guest (serial status, PIT gate, PCI).
 fn handle_io_in(port: u16, data: &mut [u8]) {
     if port == COM1_LSR && !data.is_empty() {
         // Transmitter idle and ready
         data[0] = LSR_THR_EMPTY;
+    } else if port == SYSTEM_CTRL_PORT_B && !data.is_empty() {
+        // Toggle PIT channel 2 output (bit 5) on each read.
+        // The kernel reads this in a busy loop during timer calibration,
+        // waiting for the output bit to change.
+        static TOGGLE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+        data[0] = TOGGLE.fetch_xor(0x20, std::sync::atomic::Ordering::Relaxed);
+    } else if port == PCI_CONFIG_DATA && !data.is_empty() {
+        // No PCI devices — return 0xFF (no device present)
+        for b in data.iter_mut() {
+            *b = 0xFF;
+        }
     } else {
         // Default: return zeros
         for b in data.iter_mut() {

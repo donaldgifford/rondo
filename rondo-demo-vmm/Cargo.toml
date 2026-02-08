@@ -22,6 +22,7 @@ kvm-ioctls = "0.19"
 kvm-bindings = { version = "0.10", features = ["fam-wrappers"] }
 vm-memory = { version = "0.15", features = ["backend-mmap"] }
 linux-loader = { version = "0.12", features = ["bzimage", "elf"] }
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3.8"

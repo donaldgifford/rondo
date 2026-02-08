@@ -90,6 +90,28 @@ Three GitHub Actions workflows in `.github/workflows/`:
 - Trunk-based development on `main`
 - Dual license: MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`)
 
+## Remote VMM Development
+
+The demo VMM (`rondo-demo-vmm`) requires Linux/KVM and is developed on a remote Linux box. **Always use Makefile targets for remote operations** — never SSH directly.
+
+```bash
+# Remote operations (all via Makefile)
+make vmm-sync                     # rsync source to remote
+make vmm-build                    # sync + build on remote
+make vmm-build-release            # sync + release build
+make vmm-test                     # sync + run all tests
+make vmm-test-vmm                 # sync + run VMM tests only
+make vmm-clippy                   # sync + clippy on remote
+make vmm-run ARGS="--kernel ..."  # sync + build + run VMM
+make vmm-guest                    # sync + build guest initramfs
+make vmm-bench                    # sync + run benchmarks
+make vmm-shell                    # open SSH shell on remote
+make vmm-ssh CMD="..."            # run arbitrary command on remote
+make vmm-check-kvm                # verify KVM availability
+```
+
+**Important**: `vmm-run` and `vmm-build` do `rsync --delete` which removes guest build artifacts (`out/`). Rebuild the guest after sync with `make vmm-guest`, or use `make vmm-ssh CMD="..."` to avoid re-syncing.
+
 ## Key Design Documents
 
 - `docs/VISION.md` — Project vision and non-goals

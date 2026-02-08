@@ -1157,6 +1157,7 @@ dependencies = [
  "clap",
  "kvm-bindings",
  "kvm-ioctls",
+ "libc",
  "linux-loader",
  "rondo",
  "serde",

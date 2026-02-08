@@ -155,10 +155,13 @@ impl Vmm {
         )
         .map_err(|e| VmmError::KernelLoad(format!("{e}")))?;
 
-        let kernel_entry = kernel_result.kernel_load.0;
+        let kernel_load = kernel_result.kernel_load.0;
         let kernel_end = kernel_result.kernel_end;
+        // 64-bit entry point (startup_64) is at offset 0x200 from load address
+        let kernel_entry = kernel_load + 0x200;
         tracing::info!(
-            "kernel loaded at {:#x}, ends at {:#x}",
+            "kernel loaded at {:#x}, entry at {:#x}, ends at {:#x}",
+            kernel_load,
             kernel_entry,
             kernel_end
         );

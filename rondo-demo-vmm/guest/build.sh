@@ -8,7 +8,7 @@
 #
 # Output:
 #   out/bzImage            — symlink to host kernel
-#   out/initramfs.cpio.gz  — minimal initramfs with workload
+#   out/initramfs.cpio     — minimal initramfs with workload
 
 set -euo pipefail
 
@@ -17,7 +17,14 @@ OUT_DIR="${SCRIPT_DIR}/out"
 ROOTFS="${SCRIPT_DIR}/build/rootfs"
 
 KERNEL="$(ls /boot/vmlinuz-* 2>/dev/null | sort -V | tail -1)"
-BUSYBOX="$(which busybox 2>/dev/null || echo /usr/bin/busybox)"
+# Prefer busybox-static for initramfs (no dynamic linker needed)
+if [ -x /bin/busybox-static ]; then
+    BUSYBOX=/bin/busybox-static
+elif [ -x /usr/bin/busybox-static ]; then
+    BUSYBOX=/usr/bin/busybox-static
+else
+    BUSYBOX="$(which busybox 2>/dev/null || echo /usr/bin/busybox)"
+fi
 
 if [ -z "${KERNEL}" ]; then
     echo "error: no kernel found in /boot/vmlinuz-*" >&2
@@ -50,11 +57,13 @@ cp "${SCRIPT_DIR}/workload.sh" "${ROOTFS}/workload.sh"
 chmod +x "${ROOTFS}/init" "${ROOTFS}/workload.sh"
 
 cd "${ROOTFS}"
-find . | cpio -o -H newc 2>/dev/null | gzip > "${OUT_DIR}/initramfs.cpio.gz"
+# Sort entries for reproducibility; use --quiet to suppress byte count.
+# Using uncompressed cpio — kernel handles it natively without decompressor.
+find . -print0 | sort -z | cpio --null -o -H newc --quiet > "${OUT_DIR}/initramfs.cpio"
 
-echo "initramfs: ${OUT_DIR}/initramfs.cpio.gz"
+echo "initramfs: ${OUT_DIR}/initramfs.cpio"
 echo ""
 echo "Run with:"
 echo "  cargo run -p rondo-demo-vmm -- \\"
 echo "    --kernel ${OUT_DIR}/bzImage \\"
-echo "    --initramfs ${OUT_DIR}/initramfs.cpio.gz"
+echo "    --initramfs ${OUT_DIR}/initramfs.cpio"
