@@ -163,17 +163,19 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 ### Tasks
 
 - [x] **4.1** Set up `rondo-demo-vmm` crate with rust-vmm dependencies
-  - `kvm-ioctls`, `kvm-bindings`, `vm-memory`, `linux-loader`, `vm-superio`, `event-manager` (cfg-gated to Linux)
+  - `kvm-ioctls`, `kvm-bindings`, `vm-memory`, `linux-loader`, `libc` (cfg-gated to Linux)
   - Added crate to workspace members, compiles on macOS with Linux deps gated
 - [x] **4.2** Implement minimal VMM boot in `vmm.rs`
   - KVM VM creation, memory regions via `vm-memory` 0.15
   - CPUID passthrough, identity-mapped page tables (2 MiB huge pages, 1 GiB)
   - GDT with 64-bit code + data segments, special registers for long mode boot
-  - bzImage kernel loading via `linux-loader`, initramfs support
-  - E820 memory map, boot parameters (zero page) at 0x7000
+  - bzImage kernel loading via `linux-loader`, 64-bit entry (startup_64 at load + 0x200)
+  - Initramfs loading, E820 memory map, boot parameters (zero page) at 0x7000
 - [x] **4.3** Implement vCPU thread in `vcpu.rs`
   - KVM_RUN loop with exit handling (IO, MMIO, HLT, shutdown)
   - Direct serial console handling (COM1 0x3F8) without vm-superio
+  - Port 0x61 PIT channel 2 toggle for timer calibration, PCI config (0xCFC) stub
+  - SIGALRM-based halt detection (3 consecutive IF=0 checks) for clean guest exit
 - [ ] **4.4** Add virtio-blk device in `devices/block.rs`
   - Backing file for guest disk I/O
   - Wire into event loop for async I/O completion
@@ -203,7 +205,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - `GET /metrics/info` (store metadata)
   - Simple `std::net::TcpListener` — no external HTTP framework
 - [x] **4.11** Build guest kernel and initramfs
-  - `guest/build.sh`: symlinks host kernel, builds initramfs from host busybox
+  - `guest/build.sh`: symlinks host kernel, builds uncompressed cpio initramfs with busybox-static
   - `guest/init`: minimal init (mount filesystems, run workload, poweroff)
   - `guest/workload.sh`: 4-phase workload (CPU burst, idle, I/O simulation, mixed)
   - `make vmm-guest` builds on remote Linux box
@@ -212,12 +214,12 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
 
 | Check | Criteria |
 |-------|----------|
-| [ ] | Demo VMM boots a Linux guest to serial console (requires guest kernel build) |
+| [x] | Demo VMM boots a Linux guest to serial console (full boot + workload + clean halt) |
 | [x] | vCPU exit metrics are recorded into rondo store (every exit records reason + durations) |
 | [ ] | virtio-blk I/O metrics are recorded (tasks 4.4/4.7 deferred — requires full virtio impl) |
 | [x] | `consolidate()` runs on 1s tick without blocking the event loop (maintenance thread) |
 | [x] | HTTP API returns queryable metric data (/metrics/query, /metrics/info, /metrics/health) |
-| [ ] | Guest workload produces visually distinct patterns (workload.sh written, needs testing) |
+| [x] | Guest workload produces visually distinct patterns (4-phase workload runs to completion) |
 | [x] | Total rondo overhead in VMM is < 50 lines in hot path (~10 lines: record_exit + lock) |
 
 ---
