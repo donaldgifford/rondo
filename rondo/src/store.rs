@@ -76,7 +76,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, StoreError};
+use crate::error::{QueryError, Result, StoreError};
+use crate::query::{analyze_coverage, QueryResult};
 use crate::ring::RingBuffer;
 use crate::schema::SchemaConfig;
 use crate::series::{SeriesHandle, SeriesRegistry};
@@ -519,6 +520,197 @@ impl Store {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Queries data from a specific tier of a time series.
+    ///
+    /// This method provides direct access to a specific storage tier with
+    /// explicit validation of tier index and time range. Use this when you
+    /// need precise control over which tier to query, such as for debugging
+    /// or when you know the optimal tier for your use case.
+    ///
+    /// # Arguments
+    ///
+    /// * `handle` - The series handle obtained from registration
+    /// * `tier` - The tier index to query (0 = highest resolution)
+    /// * `start_ns` - Start timestamp in nanoseconds (inclusive)
+    /// * `end_ns` - End timestamp in nanoseconds (exclusive)
+    ///
+    /// # Returns
+    ///
+    /// A [`QueryResult`] containing the iterator and metadata about the query.
+    ///
+    /// # Errors
+    ///
+    /// - [`QueryError::InvalidTier`] if tier index is out of range
+    /// - [`QueryError::InvalidTimeRange`] if start >= end
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use rondo::store::Store;
+    /// # let mut store = Store::open("./data", vec![])?;
+    /// # let handle = store.register("cpu.usage", &[])?;
+    /// # let current_time_ns = 1_640_000_000_000_000_000u64;
+    /// // Query high-resolution data (tier 0) for the last hour
+    /// let one_hour_ago = current_time_ns - 3600 * 1_000_000_000;
+    /// let result = store.query(handle, 0, one_hour_ago, current_time_ns)?;
+    ///
+    /// for (timestamp, value) in result {
+    ///     println!("CPU at {}: {}%", timestamp, value);
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn query(
+        &self,
+        handle: SeriesHandle,
+        tier: usize,
+        start_ns: u64,
+        end_ns: u64,
+    ) -> Result<QueryResult<'_>> {
+        // Validate tier index
+        let schema = &self.schemas[handle.schema_index];
+        if tier >= schema.tiers.len() {
+            return Err(QueryError::InvalidTier {
+                tier,
+                max_tiers: schema.tiers.len(),
+            }
+            .into());
+        }
+
+        // Validate time range
+        if start_ns >= end_ns {
+            return Err(QueryError::InvalidTimeRange {
+                start: start_ns,
+                end: end_ns,
+            }
+            .into());
+        }
+
+        // Get the ring buffer for this schema and tier
+        let ring = &self.rings[handle.schema_index][tier];
+
+        // Get available time range from the ring buffer
+        let oldest = ring.oldest_timestamp();
+        let newest = ring.newest_timestamp();
+        let available_range = (oldest, newest);
+
+        // Analyze coverage to determine if data may be incomplete
+        let (_, may_be_incomplete) = analyze_coverage(oldest, newest, start_ns, end_ns);
+
+        // Create iterator from ring buffer
+        let iterator = ring.read(handle.column, start_ns, end_ns)?;
+
+        Ok(QueryResult::new(
+            iterator,
+            tier,
+            available_range,
+            (start_ns, end_ns),
+            may_be_incomplete,
+        ))
+    }
+
+    /// Queries data with automatic tier selection based on retention coverage.
+    ///
+    /// This method automatically selects the best tier to serve the query by
+    /// choosing the highest-resolution tier whose retention window covers the
+    /// requested time range. If no tier fully covers the range, it falls back
+    /// to lower-resolution tiers to maximize data availability.
+    ///
+    /// The selection algorithm:
+    /// 1. Start with the highest resolution tier (tier 0)
+    /// 2. Check if its retention window covers the requested range
+    /// 3. If yes, use that tier (best quality)
+    /// 4. If no, try the next lower resolution tier
+    /// 5. Continue until a tier with coverage is found
+    /// 6. If no tier has coverage, use the lowest resolution tier
+    ///
+    /// # Arguments
+    ///
+    /// * `handle` - The series handle obtained from registration
+    /// * `start_ns` - Start timestamp in nanoseconds (inclusive)
+    /// * `end_ns` - End timestamp in nanoseconds (exclusive)
+    ///
+    /// # Returns
+    ///
+    /// A [`QueryResult`] containing the iterator and metadata about the selected
+    /// tier and data completeness.
+    ///
+    /// # Errors
+    ///
+    /// - [`QueryError::InvalidTimeRange`] if start >= end
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use rondo::store::Store;
+    /// # let mut store = Store::open("./data", vec![])?;
+    /// # let handle = store.register("cpu.usage", &[])?;
+    /// # let current_time_ns = 1_640_000_000_000_000_000u64;
+    /// // Query historical data - let rondo pick the best tier
+    /// let yesterday = current_time_ns - 24 * 3600 * 1_000_000_000;
+    /// let result = store.query_auto(handle, yesterday, current_time_ns)?;
+    ///
+    /// println!("Used tier {} for query", result.tier_used());
+    /// if result.may_be_incomplete() {
+    ///     println!("Warning: some data may be missing due to retention limits");
+    /// }
+    ///
+    /// for (timestamp, value) in result {
+    ///     println!("CPU at {}: {}%", timestamp, value);
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn query_auto(
+        &self,
+        handle: SeriesHandle,
+        start_ns: u64,
+        end_ns: u64,
+    ) -> Result<QueryResult<'_>> {
+        // Validate time range
+        if start_ns >= end_ns {
+            return Err(QueryError::InvalidTimeRange {
+                start: start_ns,
+                end: end_ns,
+            }
+            .into());
+        }
+
+        let schema = &self.schemas[handle.schema_index];
+        let mut selected_tier = 0;
+        let mut best_coverage = false;
+
+        // Find the best tier based on retention coverage
+        for (tier_index, _tier_config) in schema.tiers.iter().enumerate() {
+            let ring = &self.rings[handle.schema_index][tier_index];
+            let oldest = ring.oldest_timestamp();
+            let newest = ring.newest_timestamp();
+
+            let (fully_covered, _) = analyze_coverage(oldest, newest, start_ns, end_ns);
+
+            if fully_covered {
+                // This tier fully covers the range, use it (prefer highest resolution)
+                selected_tier = tier_index;
+                best_coverage = true;
+                break;
+            } else if oldest.is_some() && newest.is_some() {
+                // This tier has some data, consider it as fallback
+                selected_tier = tier_index;
+            }
+        }
+
+        // If no tier had full coverage and we haven't found any data at all,
+        // just use tier 0 (this handles empty store case)
+        if !best_coverage && schema.tiers.is_empty() {
+            return Err(QueryError::InvalidTier {
+                tier: 0,
+                max_tiers: 0,
+            }
+            .into());
+        }
+
+        // Query the selected tier
+        self.query(handle, selected_tier, start_ns, end_ns)
+    }
 }
 
 #[cfg(test)]
@@ -861,5 +1053,288 @@ mod tests {
 
         // Should not increase series count
         assert_eq!(store.series_count(), 1);
+    }
+
+    #[test]
+    fn test_query_specific_tier() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("query_tier_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        // Register a series
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Write some data
+        let base_time = 1_640_000_000_000_000_000u64;
+        store.record(handle, 10.0, base_time).unwrap();
+        store.record(handle, 20.0, base_time + 1_000_000_000).unwrap();
+        store.record(handle, 30.0, base_time + 2_000_000_000).unwrap();
+
+        // Query tier 0 (high resolution)
+        let result = store.query(handle, 0, base_time, base_time + 3_000_000_000).unwrap();
+
+        assert_eq!(result.tier_used(), 0);
+        assert_eq!(result.requested_range(), (base_time, base_time + 3_000_000_000));
+
+        let data: Vec<_> = result.collect_all();
+        assert_eq!(data.len(), 3);
+        assert_eq!(data[0], (base_time, 10.0));
+        assert_eq!(data[1], (base_time + 1_000_000_000, 20.0));
+        assert_eq!(data[2], (base_time + 2_000_000_000, 30.0));
+    }
+
+    #[test]
+    fn test_query_invalid_tier() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("invalid_tier_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Try to query tier 99 (doesn't exist)
+        let result = store.query(handle, 99, 1000, 2000);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            crate::error::RondoError::Query(QueryError::InvalidTier { tier, max_tiers }) => {
+                assert_eq!(tier, 99);
+                assert_eq!(max_tiers, 2); // CPU schema has 2 tiers
+            }
+            other => panic!("Expected InvalidTier error, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_query_invalid_time_range() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("invalid_range_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Try to query with start >= end
+        let result1 = store.query(handle, 0, 2000, 2000);
+        assert!(result1.is_err());
+
+        let result2 = store.query(handle, 0, 3000, 2000);
+        assert!(result2.is_err());
+
+        // Both should be InvalidTimeRange errors
+        assert!(matches!(result1.unwrap_err(), crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })));
+        assert!(matches!(result2.unwrap_err(), crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })));
+    }
+
+    #[test]
+    fn test_query_empty_result() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("empty_query_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Query without any data
+        let result = store.query(handle, 0, 1000, 2000).unwrap();
+        assert_eq!(result.tier_used(), 0);
+        assert_eq!(result.available_range(), (None, None));
+        assert!(result.may_be_incomplete());
+
+        let data: Vec<_> = result.collect_all();
+        assert_eq!(data.len(), 0);
+    }
+
+    #[test]
+    fn test_query_range_filtering() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("range_filter_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Write data at different times
+        let base_time = 1_640_000_000_000_000_000u64;
+        store.record(handle, 10.0, base_time).unwrap();
+        store.record(handle, 20.0, base_time + 1_000_000_000).unwrap();
+        store.record(handle, 30.0, base_time + 2_000_000_000).unwrap();
+        store.record(handle, 40.0, base_time + 3_000_000_000).unwrap();
+        store.record(handle, 50.0, base_time + 4_000_000_000).unwrap();
+
+        // Query a subset of the time range
+        let start_query = base_time + 1_500_000_000; // Between second and third points
+        let end_query = base_time + 3_500_000_000;   // Between fourth and fifth points
+
+        let result = store.query(handle, 0, start_query, end_query).unwrap();
+        let data: Vec<_> = result.collect_all();
+
+        // Should only get the third and fourth data points
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0], (base_time + 2_000_000_000, 30.0));
+        assert_eq!(data[1], (base_time + 3_000_000_000, 40.0));
+    }
+
+    #[test]
+    fn test_query_auto_tier_selection() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("auto_select_store");
+
+        // Create schemas with different retention windows
+        let schemas = vec![
+            SchemaConfig {
+                name: "short_term".to_string(),
+                label_matcher: LabelMatcher::new([("type", "cpu")]),
+                tiers: vec![
+                    TierConfig {
+                        interval: Duration::from_secs(1),
+                        retention: Duration::from_secs(60),  // 1 minute retention
+                        consolidation_fn: None,
+                    },
+                    TierConfig {
+                        interval: Duration::from_secs(60),
+                        retention: Duration::from_secs(3600), // 1 hour retention
+                        consolidation_fn: Some(ConsolidationFn::Average),
+                    },
+                ],
+                max_series: 1000,
+            }
+        ];
+
+        let mut store = Store::open(&store_path, schemas).unwrap();
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Write data across time ranges
+        let base_time = 1_640_000_000_000_000_000u64;
+
+        // Recent data (tier 0 should handle this)
+        store.record(handle, 10.0, base_time).unwrap();
+        store.record(handle, 20.0, base_time + 30_000_000_000).unwrap();
+
+        // Query recent data - should use tier 0
+        let result = store.query_auto(handle, base_time, base_time + 45_000_000_000).unwrap();
+        assert_eq!(result.tier_used(), 0);
+
+        let data: Vec<_> = result.collect_all();
+        assert_eq!(data.len(), 2);
+    }
+
+    #[test]
+    fn test_query_auto_with_empty_store() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("empty_auto_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Query auto on empty store
+        let result = store.query_auto(handle, 1000, 2000).unwrap();
+        assert_eq!(result.tier_used(), 0); // Should default to tier 0
+        assert!(result.may_be_incomplete());
+        assert_eq!(result.available_range(), (None, None));
+
+        let data: Vec<_> = result.collect_all();
+        assert_eq!(data.len(), 0);
+    }
+
+    #[test]
+    fn test_query_auto_invalid_time_range() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("auto_invalid_range_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Try query_auto with invalid range
+        let result = store.query_auto(handle, 2000, 1000);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })));
+    }
+
+    #[test]
+    fn test_query_result_metadata() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("metadata_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Write some data
+        let base_time = 1_640_000_000_000_000_000u64;
+        store.record(handle, 42.0, base_time).unwrap();
+        store.record(handle, 84.0, base_time + 1_000_000_000).unwrap();
+
+        let query_start = base_time - 500_000_000; // Start before first data point
+        let query_end = base_time + 2_000_000_000;
+
+        let result = store.query(handle, 0, query_start, query_end).unwrap();
+
+        // Test metadata methods
+        assert_eq!(result.tier_used(), 0);
+        assert_eq!(result.requested_range(), (query_start, query_end));
+
+        let (oldest, newest) = result.available_range();
+        assert_eq!(oldest, Some(base_time));
+        assert_eq!(newest, Some(base_time + 1_000_000_000));
+
+        // Should be marked as potentially incomplete because we requested
+        // data from before the oldest available timestamp
+        assert!(result.may_be_incomplete());
+    }
+
+    #[test]
+    fn test_query_result_count() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("count_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+
+        // Write multiple data points
+        let base_time = 1_640_000_000_000_000_000u64;
+        for i in 0u32..5 {
+            store.record(handle, f64::from(i * 10), base_time + u64::from(i) * 1_000_000_000).unwrap();
+        }
+
+        let result = store.query(handle, 0, base_time, base_time + 5_000_000_000).unwrap();
+
+        // Test count method (this consumes the iterator)
+        assert_eq!(result.count(), 5);
+    }
+
+    #[test]
+    fn test_query_multiple_schemas() {
+        let temp_dir = tempdir().unwrap();
+        let store_path = temp_dir.path().join("multi_schema_query_store");
+        let schemas = create_test_schemas();
+        let mut store = Store::open(&store_path, schemas).unwrap();
+
+        // Register series in different schemas
+        let cpu_handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let mem_handle = store.register("mem.usage", &[("type".to_string(), "memory".to_string())]).unwrap();
+
+        // Write data to both
+        let base_time = 1_640_000_000_000_000_000u64;
+        store.record(cpu_handle, 80.0, base_time).unwrap();
+        store.record(mem_handle, 60.0, base_time).unwrap();
+
+        // Query both schemas
+        let cpu_result = store.query(cpu_handle, 0, base_time, base_time + 1_000_000_000).unwrap();
+        let mem_result = store.query(mem_handle, 0, base_time, base_time + 1_000_000_000).unwrap();
+
+        // Verify they're in different schemas but queries work correctly
+        assert_eq!(cpu_handle.schema_index, 0);
+        assert_eq!(mem_handle.schema_index, 1);
+
+        let cpu_data: Vec<_> = cpu_result.collect_all();
+        let mem_data: Vec<_> = mem_result.collect_all();
+
+        assert_eq!(cpu_data, vec![(base_time, 80.0)]);
+        assert_eq!(mem_data, vec![(base_time, 60.0)]);
     }
 }

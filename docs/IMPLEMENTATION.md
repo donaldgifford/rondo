@@ -47,7 +47,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - `Store::record(handle, value, timestamp)` — **the hot path**: write to mmap'd slot, no alloc, no syscall
   - `Store::record_batch(entries, timestamp)` — multi-series write at same timestamp
   - `meta.json` read/write for schema persistence
-- [ ] **1.6** Implement basic query in `rondo/src/query.rs`
+- [x] **1.6** Implement basic query in `rondo/src/query.rs`
   - `Store::query(handle, tier, start, end)` → iterator over `(u64, f64)` pairs
   - Handle ring buffer wraparound in read path
   - Skip NaN entries
