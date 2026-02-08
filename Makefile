@@ -66,6 +66,9 @@ vmm-shell: ## Open SSH shell on remote Linux box in project dir
 vmm-check-kvm: ## Verify KVM is available on remote box
 	ssh $(VMM_HOST) "ls -l /dev/kvm && lscpu | grep -i virtual"
 
+vmm-guest: vmm-sync ## Build guest kernel and initramfs on remote box
+	ssh $(VMM_HOST) "cd $(VMM_DIR)/rondo-demo-vmm/guest && ./build.sh"
+
 vmm-ssh: ## Run arbitrary command on remote box (pass CMD=)
 	ssh $(VMM_HOST) "$(VMM_CARGO) && $(CMD)"
 

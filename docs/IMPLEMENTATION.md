@@ -202,10 +202,12 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - `GET /metrics/health` (liveness check)
   - `GET /metrics/info` (store metadata)
   - Simple `std::net::TcpListener` — no external HTTP framework
-- [ ] **4.11** Build guest kernel and initramfs
-  - Minimal kernel config: KVM guest, virtio drivers, no modules
-  - BusyBox initramfs with synthetic workload (CPU bursts + disk I/O + idle periods)
-  - Build script in `rondo-demo-vmm/guest/build.sh`
+- [x] **4.11** Build guest kernel and initramfs
+  - `guest/build.sh`: downloads and builds Linux kernel (6.6.70) with KVM guest config
+  - `guest/kernel-config.sh`: minimal config overrides (serial, virtio, no modules/USB/sound)
+  - BusyBox 1.36.1 initramfs (statically linked) with synthetic workload
+  - `guest/workload.sh`: 4-phase workload (CPU burst, idle, I/O simulation, mixed)
+  - `make vmm-guest` builds on remote Linux box
 
 ### Phase 4 Acceptance
 

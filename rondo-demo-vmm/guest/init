@@ -1,0 +1,19 @@
+#!/bin/sh
+# Minimal init for rondo-demo-vmm guest.
+# Mounts filesystems, prints a banner, runs the workload, then powers off.
+
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+echo "========================================"
+echo " rondo-demo-vmm guest"
+echo " kernel: $(uname -r)"
+echo " uptime: $(cat /proc/uptime | cut -d' ' -f1)s"
+echo "========================================"
+
+# Run synthetic workload (generates metrics-visible patterns)
+/workload.sh
+
+echo "Guest workload complete. Powering off."
+poweroff -f
