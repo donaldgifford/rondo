@@ -228,14 +228,17 @@ fn cmd_query(
 
     let store = rondo::Store::open(store_path, schemas)?;
 
-    // Find the series handle by name
+    // Parse series selector: "name" or "name{key=value,...}"
+    let (metric_name, label_filter) = parse_series_selector(series_name);
+
+    // Find the series handle by name and optional label filter
     let handles = store.handles();
     let handle = handles
         .iter()
         .find(|h| {
-            store
-                .series_info(h)
-                .is_some_and(|(name, _)| name == series_name)
+            store.series_info(h).is_some_and(|(name, labels)| {
+                name == metric_name && matches_labels(labels, &label_filter[..])
+            })
         })
         .ok_or_else(|| format!("Series '{series_name}' not found"))?;
 
@@ -429,6 +432,48 @@ fn dir_size(path: &PathBuf) -> Result<u64, Box<dyn std::error::Error>> {
         }
     }
     Ok(total)
+}
+
+/// Parses a series selector string like `"name{key=value,key2=value2}"`.
+///
+/// Returns the metric name and a list of label key-value pairs.
+/// If no labels are specified, returns an empty list (matches any labels).
+fn parse_series_selector(selector: &str) -> (&str, Vec<(&str, &str)>) {
+    if let Some(brace_start) = selector.find('{') {
+        let name = &selector[..brace_start];
+        let labels_str = selector[brace_start + 1..].trim_end_matches('}');
+        let labels: Vec<(&str, &str)> = labels_str
+            .split(',')
+            .filter_map(|pair| {
+                let mut parts = pair.splitn(2, '=');
+                let key = parts.next()?.trim();
+                let value = parts.next()?.trim();
+                if key.is_empty() {
+                    None
+                } else {
+                    Some((key, value))
+                }
+            })
+            .collect();
+        (name, labels)
+    } else {
+        (selector, Vec::new())
+    }
+}
+
+/// Checks if a series' labels match the given filter.
+///
+/// An empty filter matches any labels. When a filter is provided, all
+/// specified key-value pairs must be present in the series labels.
+fn matches_labels(series_labels: &[(String, String)], filter: &[(&str, &str)]) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    filter.iter().all(|(fk, fv)| {
+        series_labels
+            .iter()
+            .any(|(sk, sv)| sk.as_str() == *fk && sv.as_str() == *fv)
+    })
 }
 
 /// Reconstructs `SchemaConfig` values from stored metadata JSON.
