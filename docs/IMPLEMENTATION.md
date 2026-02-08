@@ -51,7 +51,7 @@ The library (Phases 1-3) is identical across all plans. Only Phase 4 changes if 
   - `Store::query(handle, tier, start, end)` → iterator over `(u64, f64)` pairs
   - Handle ring buffer wraparound in read path
   - Skip NaN entries
-- [ ] **1.7** Wire up `rondo/src/lib.rs` — public API re-exports, crate-level docs
+- [x] **1.7** Wire up `rondo/src/lib.rs` — public API re-exports, crate-level docs
 - [ ] **1.8** Unit tests
   - Ring buffer: wraparound, slot computation, boundary conditions
   - Slab: create/open/reopen lifecycle, mmap integrity
