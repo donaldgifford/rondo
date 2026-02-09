@@ -301,10 +301,9 @@ pub fn run_vcpu_loop(
                         VcpuExitReason::Io
                     }
                     VcpuExit::MmioRead(addr, data) => {
+                        let blk_range = block::MMIO_BASE..block::MMIO_BASE + block::MMIO_SIZE;
                         if let Some(ref blk) = block_device {
-                            if addr >= block::MMIO_BASE
-                                && addr < block::MMIO_BASE + block::MMIO_SIZE
-                            {
+                            if blk_range.contains(&addr) {
                                 blk.mmio_read(addr - block::MMIO_BASE, data);
                             } else {
                                 for b in data.iter_mut() {
@@ -319,22 +318,21 @@ pub fn run_vcpu_loop(
                         VcpuExitReason::Mmio
                     }
                     VcpuExit::MmioWrite(addr, data) => {
-                        if let Some(ref mut blk) = block_device {
-                            if addr >= block::MMIO_BASE
-                                && addr < block::MMIO_BASE + block::MMIO_SIZE
-                            {
-                                let write_result =
-                                    blk.mmio_write(addr - block::MMIO_BASE, data, guest_memory);
-                                if write_result.needs_interrupt {
-                                    // Edge-triggered: assert then deassert. The in-kernel
-                                    // PIC latches the IRQ on assertion.
-                                    let _ = vm_fd.set_irq_line(block::IRQ, true);
-                                    let _ = vm_fd.set_irq_line(block::IRQ, false);
-                                }
-                                // Record block I/O metrics.
-                                for io in &write_result.completed {
-                                    record_blk_io(&metrics, io);
-                                }
+                        if let Some(ref mut blk) = block_device
+                            && (block::MMIO_BASE..block::MMIO_BASE + block::MMIO_SIZE)
+                                .contains(&addr)
+                        {
+                            let write_result =
+                                blk.mmio_write(addr - block::MMIO_BASE, data, guest_memory);
+                            if write_result.needs_interrupt {
+                                // Edge-triggered: assert then deassert. The in-kernel
+                                // PIC latches the IRQ on assertion.
+                                let _ = vm_fd.set_irq_line(block::IRQ, true);
+                                let _ = vm_fd.set_irq_line(block::IRQ, false);
+                            }
+                            // Record block I/O metrics.
+                            for io in &write_result.completed {
+                                record_blk_io(&metrics, io);
                             }
                         }
                         VcpuExitReason::Mmio
