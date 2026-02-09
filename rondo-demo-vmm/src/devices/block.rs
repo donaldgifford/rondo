@@ -421,7 +421,7 @@ impl VirtioBlock {
     /// 512-byte sectors.
     fn read_config(&self, config_offset: u64, data: &mut [u8]) {
         let config_bytes = self.capacity_sectors.to_le_bytes();
-        let start = config_offset as usize;
+        let start = usize::try_from(config_offset).unwrap_or(usize::MAX);
         if start < config_bytes.len() {
             let end = (start + data.len()).min(config_bytes.len());
             let len = end - start;
@@ -570,10 +570,11 @@ impl VirtioBlock {
         }
 
         // The last descriptor with WRITE flag and length 1 is the status byte.
-        if let Some(last) = data_descs.last() {
-            if last.len == 1 && last.flags & VIRTQ_DESC_F_WRITE != 0 {
-                status_desc = data_descs.pop();
-            }
+        if let Some(last) = data_descs.last()
+            && last.len == 1
+            && last.flags & VIRTQ_DESC_F_WRITE != 0
+        {
+            status_desc = data_descs.pop();
         }
 
         // 4. Dispatch the request by type.
