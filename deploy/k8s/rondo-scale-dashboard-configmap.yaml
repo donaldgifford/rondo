@@ -18,7 +18,7 @@ data:
         }
       ],
       "annotations": { "list": [] },
-      "description": "Scale benchmark: resource usage across 10/50/100 concurrent rondo-demo-vmm instances, pushed via Prometheus remote-write with per-instance labels.",
+      "description": "Embedded 1s metrics from 100 concurrent VMMs — fleet lifecycle, distributions, and resolution advantage vs scrape-based monitoring.",
       "editable": true,
       "fiscalYearStartMonth": 0,
       "graphTooltip": 1,
@@ -28,9 +28,43 @@ data:
         {
           "collapsed": false,
           "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-          "id": 20,
-          "title": "Fleet Overview",
+          "id": 30,
+          "title": "Fleet Lifecycle",
           "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "fixedColor": "green", "mode": "fixed" },
+              "custom": {
+                "axisBorderShow": false, "axisCenteredZero": false, "axisLabel": "", "axisPlacement": "auto",
+                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 40, "gradientMode": "scheme",
+                "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 3,
+                "scaleDistribution": { "type": "linear" }, "showPoints": "always", "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" }
+              },
+              "mappings": [],
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 16, "x": 0, "y": 1 },
+          "id": 1,
+          "options": {
+            "legend": { "calcs": ["max"], "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "single", "sort": "none" }
+          },
+          "title": "Active VMs Over Time",
+          "type": "timeseries",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "count(vmm_uptime_seconds)",
+              "legendFormat": "active VMs",
+              "refId": "A"
+            }
+          ]
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -50,17 +84,17 @@ data:
             },
             "overrides": []
           },
-          "gridPos": { "h": 6, "w": 8, "x": 0, "y": 1 },
-          "id": 1,
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+          "id": 2,
           "options": {
             "colorMode": "value",
-            "graphMode": "area",
+            "graphMode": "none",
             "justifyMode": "auto",
             "orientation": "auto",
-            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "reduceOptions": { "calcs": ["max"], "fields": "", "values": false },
             "textMode": "auto"
           },
-          "title": "Active VMs",
+          "title": "Peak VMs",
           "type": "stat",
           "targets": [
             {
@@ -89,8 +123,43 @@ data:
             },
             "overrides": []
           },
-          "gridPos": { "h": 6, "w": 8, "x": 8, "y": 1 },
-          "id": 2,
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": { "calcs": ["max"], "fields": "", "values": false },
+            "textMode": "auto"
+          },
+          "title": "Total Fleet RSS",
+          "type": "stat",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "sum(vmm_rss_bytes)",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{ "color": "green", "value": null }]
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 5 },
+          "id": 4,
           "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -99,12 +168,12 @@ data:
             "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
             "textMode": "auto"
           },
-          "title": "Total RSS",
+          "title": "Avg RSS per VM",
           "type": "stat",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "expr": "sum(vmm_rss_bytes)",
+              "expr": "avg(vmm_rss_bytes)",
               "legendFormat": "",
               "refId": "A"
             }
@@ -128,14 +197,14 @@ data:
             },
             "overrides": []
           },
-          "gridPos": { "h": 6, "w": 8, "x": 16, "y": 1 },
-          "id": 3,
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 5 },
+          "id": 5,
           "options": {
             "colorMode": "value",
             "graphMode": "area",
             "justifyMode": "auto",
             "orientation": "auto",
-            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "reduceOptions": { "calcs": ["max"], "fields": "", "values": false },
             "textMode": "auto"
           },
           "title": "Total FDs",
@@ -151,9 +220,9 @@ data:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
-          "id": 21,
-          "title": "Per-Instance Metrics",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+          "id": 31,
+          "title": "Fleet Distribution",
           "type": "row"
         },
         {
@@ -163,72 +232,152 @@ data:
               "color": { "mode": "palette-classic" },
               "custom": {
                 "axisBorderShow": false, "axisCenteredZero": false, "axisLabel": "", "axisPlacement": "auto",
-                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none",
-                "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5,
-                "scaleDistribution": { "type": "linear" }, "showPoints": "auto", "spanNulls": false,
-                "stacking": { "group": "A", "mode": "none" }
-              },
-              "mappings": [],
-              "unit": "s"
-            },
-            "overrides": []
-          },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-          "id": 4,
-          "options": {
-            "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "title": "Uptime by Instance",
-          "type": "timeseries",
-          "targets": [
-            {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "expr": "vmm_uptime_seconds",
-              "legendFormat": "{{instance}}",
-              "refId": "A"
-            }
-          ]
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "palette-classic" },
-              "custom": {
-                "axisBorderShow": false, "axisCenteredZero": false, "axisLabel": "", "axisPlacement": "auto",
-                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none",
-                "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5,
+                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none",
+                "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5,
                 "scaleDistribution": { "type": "linear" }, "showPoints": "auto", "spanNulls": false,
                 "stacking": { "group": "A", "mode": "none" }
               },
               "mappings": [],
               "unit": "bytes"
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "p50" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } },
+                  { "id": "custom.lineWidth", "value": 2 },
+                  { "id": "custom.fillBelowTo", "value": "p95" },
+                  { "id": "custom.fillOpacity", "value": 15 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "p95" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } },
+                  { "id": "custom.lineWidth", "value": 1 },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+                  { "id": "custom.fillBelowTo", "value": "p99" },
+                  { "id": "custom.fillOpacity", "value": 10 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "p99" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+                  { "id": "custom.lineWidth", "value": 1 },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }
+                ]
+              }
+            ]
           },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-          "id": 5,
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+          "id": 6,
           "options": {
             "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" },
             "tooltip": { "mode": "multi", "sort": "desc" }
           },
-          "title": "RSS by Instance",
+          "title": "RSS Distribution (p50 / p95 / p99)",
           "type": "timeseries",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "expr": "vmm_rss_bytes",
-              "legendFormat": "{{instance}}",
+              "expr": "quantile(0.5, vmm_rss_bytes)",
+              "legendFormat": "p50",
               "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "quantile(0.95, vmm_rss_bytes)",
+              "legendFormat": "p95",
+              "refId": "B"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "quantile(0.99, vmm_rss_bytes)",
+              "legendFormat": "p99",
+              "refId": "C"
+            }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false, "axisCenteredZero": false, "axisLabel": "", "axisPlacement": "auto",
+                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none",
+                "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5,
+                "scaleDistribution": { "type": "linear" }, "showPoints": "auto", "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" }
+              },
+              "mappings": [],
+              "unit": "ns"
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "p50" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } },
+                  { "id": "custom.lineWidth", "value": 2 },
+                  { "id": "custom.fillBelowTo", "value": "p95" },
+                  { "id": "custom.fillOpacity", "value": 15 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "p95" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } },
+                  { "id": "custom.lineWidth", "value": 1 },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+                  { "id": "custom.fillBelowTo", "value": "p99" },
+                  { "id": "custom.fillOpacity", "value": 10 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "p99" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+                  { "id": "custom.lineWidth", "value": 1 },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }
+                ]
+              }
+            ]
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+          "id": 7,
+          "options": {
+            "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "title": "vCPU Exit Duration (p50 / p95 / p99)",
+          "type": "timeseries",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "quantile(0.5, vcpu_exit_duration_ns)",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "quantile(0.95, vcpu_exit_duration_ns)",
+              "legendFormat": "p95",
+              "refId": "B"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "quantile(0.99, vcpu_exit_duration_ns)",
+              "legendFormat": "p99",
+              "refId": "C"
             }
           ]
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
-          "id": 22,
-          "title": "vCPU Aggregate",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+          "id": 32,
+          "title": "vCPU Behavior at Scale",
           "type": "row"
         },
         {
@@ -238,7 +387,7 @@ data:
               "color": { "mode": "palette-classic" },
               "custom": {
                 "axisBorderShow": false, "axisCenteredZero": false, "axisLabel": "", "axisPlacement": "auto",
-                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "none",
+                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 80, "gradientMode": "none",
                 "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5,
                 "scaleDistribution": { "type": "linear" }, "showPoints": "auto", "spanNulls": false,
                 "stacking": { "group": "A", "mode": "normal" }
@@ -248,13 +397,13 @@ data:
             },
             "overrides": []
           },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
-          "id": 6,
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+          "id": 8,
           "options": {
             "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" },
             "tooltip": { "mode": "multi", "sort": "desc" }
           },
-          "title": "vCPU Exits (aggregate by reason)",
+          "title": "Fleet vCPU Exits by Reason",
           "type": "timeseries",
           "targets": [
             {
@@ -272,32 +421,130 @@ data:
               "color": { "mode": "palette-classic" },
               "custom": {
                 "axisBorderShow": false, "axisCenteredZero": false, "axisLabel": "", "axisPlacement": "auto",
-                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none",
-                "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5,
+                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none",
+                "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5,
                 "scaleDistribution": { "type": "linear" }, "showPoints": "auto", "spanNulls": false,
                 "stacking": { "group": "A", "mode": "none" }
               },
               "mappings": [],
               "unit": "ns"
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "p50" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "p99" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }
+                ]
+              }
+            ]
           },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
-          "id": 7,
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+          "id": 9,
           "options": {
             "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" },
-            "tooltip": { "mode": "single", "sort": "none" }
+            "tooltip": { "mode": "multi", "sort": "desc" }
           },
-          "title": "Avg Exit Duration",
+          "title": "KVM_RUN Duration (p50 / p99)",
           "type": "timeseries",
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "expr": "avg(vcpu_exit_duration_ns)",
-              "legendFormat": "avg exit duration",
+              "expr": "quantile(0.5, vcpu_run_duration_ns)",
+              "legendFormat": "p50",
               "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "quantile(0.99, vcpu_run_duration_ns)",
+              "legendFormat": "p99",
+              "refId": "B"
             }
           ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+          "id": 33,
+          "title": "Resolution Advantage",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisBorderShow": false, "axisCenteredZero": false, "axisLabel": "", "axisPlacement": "auto",
+                "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none",
+                "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5,
+                "scaleDistribution": { "type": "linear" }, "showPoints": "auto", "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" }
+              },
+              "mappings": [],
+              "unit": "short"
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "1s embedded (rondo)" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } },
+                  { "id": "custom.lineWidth", "value": 2 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "15s scrape (simulated)" },
+                "properties": [
+                  { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
+                  { "id": "custom.lineWidth", "value": 2 },
+                  { "id": "custom.lineInterpolation", "value": "stepAfter" },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }
+                ]
+              }
+            ]
+          },
+          "gridPos": { "h": 6, "w": 16, "x": 0, "y": 28 },
+          "id": 10,
+          "options": {
+            "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "none" }
+          },
+          "title": "1s Recording vs 15s Scraping",
+          "type": "timeseries",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "count(vmm_uptime_seconds)",
+              "legendFormat": "1s embedded (rondo)",
+              "interval": "",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "count(vmm_uptime_seconds)",
+              "legendFormat": "15s scrape (simulated)",
+              "interval": "15s",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "datasource": { "type": "datasource", "uid": "-- Dashboard --" },
+          "gridPos": { "h": 6, "w": 8, "x": 16, "y": 28 },
+          "id": 11,
+          "options": {
+            "code": { "language": "plaintext", "showLineNumbers": false, "showMiniMap": false },
+            "content": "### Embedded vs Scrape\n\n| | Rondo (embedded) | Scrape-based |\n|---|---|---|\n| **Resolution** | 1 second | 15 seconds |\n| **Points / VM** | ~15 | ~1 |\n| **Boot visibility** | Every VM start | Batch jumps |\n| **Extra processes** | 0 | N + 1 |\n| **Network overhead** | Push on export | Continuous poll |",
+            "mode": "markdown"
+          },
+          "title": "",
+          "type": "text"
         }
       ],
       "schemaVersion": 39,
@@ -308,5 +555,5 @@ data:
       "timezone": "",
       "title": "Rondo Scale Benchmark",
       "uid": "rondo-scale-benchmark",
-      "version": 1
+      "version": 2
     }
