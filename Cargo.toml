@@ -50,7 +50,10 @@ clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 prost = "0.13"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "blocking",
+  "rustls-tls",
+] }
 snap = "1.1"
 
 # rust-vmm crates (for demo VMM, when needed)

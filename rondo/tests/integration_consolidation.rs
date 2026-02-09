@@ -136,9 +136,10 @@ fn test_tier_cascade() {
 
     // Write data in small batches with consolidation between each to prevent
     // tier 0 from wrapping (it only holds 60 slots at 1s interval).
-    // We write 10 batches of 40s each (400s total) to generate plenty of
-    // tier 1 data for the tier 1→2 cascade.
-    for batch in 0u32..10 {
+    // We write 15 batches of 40s each (600s total) to generate plenty of
+    // tier 1 data for the tier 1→2 cascade (tier 2 has 60s windows,
+    // so 600s gives 10 full windows with no boundary edge cases).
+    for batch in 0u32..15 {
         for i in 0u32..40 {
             let offset = batch * 40 + i;
             let timestamp = BASE_TIME + u64::from(offset) * 1_000_000_000;
@@ -157,9 +158,9 @@ fn test_tier_cascade() {
         }
     }
 
-    // Tier 1 should have data (10s averages spanning 400s = ~40 points)
+    // Tier 1 should have data (10s averages spanning 600s = ~60 points)
     let tier1_data: Vec<_> = store
-        .query(handle, 1, BASE_TIME, BASE_TIME + 410_000_000_000)
+        .query(handle, 1, BASE_TIME, BASE_TIME + 610_000_000_000)
         .unwrap()
         .collect();
     assert!(
@@ -168,9 +169,9 @@ fn test_tier_cascade() {
     );
 
     // Tier 2 should have data (cascaded from tier 1, 60s windows)
-    // With 400s of data and 60s windows, should have ~6 points.
+    // With 600s of data and 60s windows, should have ~9-10 points.
     let tier2_data: Vec<_> = store
-        .query(handle, 2, BASE_TIME, BASE_TIME + 410_000_000_000)
+        .query(handle, 2, BASE_TIME, BASE_TIME + 610_000_000_000)
         .unwrap()
         .collect();
 
