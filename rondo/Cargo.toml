@@ -8,8 +8,28 @@ repository = "https://github.com/donaldgifford/rondo"
 keywords = ["time-series", "metrics", "embedded", "round-robin", "monitoring"]
 categories = ["database", "embedded"]
 
+[features]
+default = []
+prometheus-remote-write = ["dep:prost", "dep:reqwest", "dep:snap"]
 
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+memmap2 = { workspace = true }
+prost = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+snap = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+tempfile = "3.8"
+prost = { workspace = true }
+snap = { workspace = true }
+
+[[bench]]
+name = "record"
+harness = false
 
 [lints]
 workspace = true

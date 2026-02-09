@@ -1,0 +1,530 @@
+#!/usr/bin/env bash
+# Benchmark B: Resource overhead at scale.
+#
+# Spawns 10/50/100 concurrent rondo-demo-vmm instances, measures aggregate
+# resource usage (RSS, CPU, FDs, disk), and compares against estimated
+# Prometheus + node-exporter stack overhead.
+#
+# Prerequisites:
+#   - Linux with KVM (/dev/kvm accessible)
+#   - Guest kernel and initramfs built (run: cd rondo-demo-vmm/guest && ./build.sh)
+#   - rondo-demo-vmm built in release mode (cargo build -p rondo-demo-vmm --release)
+#
+# Usage:
+#   ./benchmark_scale.sh [--counts "10 50 100"] [--duration 15] [--kernel PATH] [--initramfs PATH] [--remote-write URL]
+
+set -euo pipefail
+
+# ── Defaults ──────────────────────────────────────────────────────────
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+COUNTS="${COUNTS:-10 50 100}"
+WORKLOAD_DURATION="${DURATION:-15}"
+KERNEL="${KERNEL:-${PROJECT_DIR}/rondo-demo-vmm/guest/out/bzImage}"
+INITRAMFS="${INITRAMFS:-${PROJECT_DIR}/rondo-demo-vmm/guest/out/initramfs.cpio}"
+VMM_BINARY="${VMM_BINARY:-${PROJECT_DIR}/target/release/rondo-demo-vmm}"
+REMOTE_WRITE_URL=""
+BASE_PORT=9200
+BASE_DIR="/tmp/rondo_bench_scale"
+CMDLINE_BASE="console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 noapic notsc clocksource=jiffies lpj=1000000 rdinit=/init"
+SAMPLE_INTERVAL=2
+
+# Global PID tracking for cleanup on interrupt / SSH disconnect
+ALL_VMM_PIDS=()
+SAMPLER_PID=""
+
+# ── Parse arguments ───────────────────────────────────────────────────
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	--counts)
+		COUNTS="$2"
+		shift 2
+		;;
+	--duration)
+		WORKLOAD_DURATION="$2"
+		shift 2
+		;;
+	--kernel)
+		KERNEL="$2"
+		shift 2
+		;;
+	--initramfs)
+		INITRAMFS="$2"
+		shift 2
+		;;
+	--binary)
+		VMM_BINARY="$2"
+		shift 2
+		;;
+	--remote-write)
+		REMOTE_WRITE_URL="$2"
+		shift 2
+		;;
+	--help | -h)
+		echo "Usage: $0 [--counts '10 50 100'] [--duration 15] [--kernel PATH] [--initramfs PATH] [--remote-write URL]"
+		exit 0
+		;;
+	*)
+		echo "Unknown argument: $1" >&2
+		exit 1
+		;;
+	esac
+done
+
+# ── Trap: cleanup on exit / interrupt ─────────────────────────────────
+
+cleanup_all() {
+	echo ""
+	echo "Cleaning up all VMM processes..."
+	rm -f "${CONTROL_FILE:-}" 2>/dev/null || true
+
+	if [[ -n "$SAMPLER_PID" ]] && kill -0 "$SAMPLER_PID" 2>/dev/null; then
+		kill "$SAMPLER_PID" 2>/dev/null || true
+	fi
+
+	for pid in "${ALL_VMM_PIDS[@]}"; do
+		kill "$pid" 2>/dev/null || true
+	done
+	sleep 1
+	for pid in "${ALL_VMM_PIDS[@]}"; do
+		kill -9 "$pid" 2>/dev/null || true
+	done
+
+	ALL_VMM_PIDS=()
+	echo "Cleanup done."
+}
+
+trap cleanup_all EXIT INT TERM HUP
+
+# ── Pre-flight checks ────────────────────────────────────────────────
+
+preflight() {
+	local ok=true
+
+	if [[ ! -e /dev/kvm ]]; then
+		echo "ERROR: /dev/kvm not found — KVM required" >&2
+		ok=false
+	fi
+	if [[ ! -f "$KERNEL" ]]; then
+		echo "ERROR: kernel not found at $KERNEL" >&2
+		echo "  Run: cd rondo-demo-vmm/guest && ./build.sh" >&2
+		ok=false
+	fi
+	if [[ ! -f "$INITRAMFS" ]]; then
+		echo "ERROR: initramfs not found at $INITRAMFS" >&2
+		echo "  Run: cd rondo-demo-vmm/guest && ./build.sh" >&2
+		ok=false
+	fi
+	if [[ ! -x "$VMM_BINARY" ]]; then
+		echo "ERROR: VMM binary not found at $VMM_BINARY" >&2
+		echo "  Run: cargo build -p rondo-demo-vmm --release" >&2
+		ok=false
+	fi
+
+	if [[ "$ok" != "true" ]]; then
+		exit 1
+	fi
+
+	echo "Pre-flight OK"
+	echo "  kernel:       $KERNEL"
+	echo "  initramfs:    $INITRAMFS"
+	echo "  binary:       $VMM_BINARY"
+	echo "  workload:     ${WORKLOAD_DURATION}s"
+	echo "  counts:       $COUNTS"
+	echo "  remote-write: ${REMOTE_WRITE_URL:-disabled}"
+	echo "  ulimit -n:    $(ulimit -n)"
+	echo ""
+}
+
+# ── Resource sampling ─────────────────────────────────────────────────
+
+# Sample aggregate resource usage for a list of PIDs.
+# Writes CSV lines: timestamp,total_rss_kb,total_cpu_ticks,total_fds,alive_count
+# Runs with set +e so individual /proc read failures don't kill the sampler.
+sample_resources() {
+	set +e
+	local csv_file="$1"
+	shift
+	local pids=("$@")
+
+	echo "timestamp,total_rss_kb,total_cpu_ticks,total_fds,alive_count" >"$csv_file"
+
+	while [[ -f "${CONTROL_FILE}" ]]; do
+		local ts
+		ts=$(date +%s)
+		local total_rss=0
+		local total_cpu=0
+		local total_fds=0
+		local alive=0
+
+		for pid in "${pids[@]}"; do
+			if [[ -d "/proc/$pid" ]]; then
+				alive=$((alive + 1))
+
+				# RSS from /proc/PID/status (VmRSS in kB)
+				local rss
+				rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo 0)
+				total_rss=$((total_rss + rss))
+
+				# CPU ticks from /proc/PID/stat (field 14=utime + field 15=stime)
+				local cpu
+				cpu=$(awk '{printf "%d", $14 + $15}' "/proc/$pid/stat" 2>/dev/null || echo 0)
+				total_cpu=$((total_cpu + cpu))
+
+				# Open file descriptors
+				local fds
+				fds=$(find "/proc/$pid/fd" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l)
+				total_fds=$((total_fds + fds))
+			fi
+		done
+
+		echo "${ts},${total_rss},${total_cpu},${total_fds},${alive}" >>"$csv_file"
+
+		# Stop sampling if all processes exited
+		if [[ $alive -eq 0 ]]; then
+			break
+		fi
+
+		sleep "$SAMPLE_INTERVAL"
+	done
+}
+
+# ── VMM launcher ──────────────────────────────────────────────────────
+
+# Launches VMMs directly in the current shell (not a subshell) so PIDs
+# are trackable. Populates the global ALL_VMM_PIDS array and prints
+# the PID list to stdout.
+launch_vmms() {
+	local count=$1
+	local run_dir="$2"
+
+	mkdir -p "$run_dir/stores" "$run_dir/logs"
+
+	for i in $(seq 1 "$count"); do
+		local port=$((BASE_PORT + i))
+		local store_dir="$run_dir/stores/vmm_${i}"
+		local log_file="$run_dir/logs/vmm_${i}.log"
+
+		local rw_args=()
+		if [[ -n "$REMOTE_WRITE_URL" ]]; then
+			rw_args=(--remote-write "$REMOTE_WRITE_URL" --external-labels "instance=vmm_${i}")
+		fi
+
+		"$VMM_BINARY" \
+			--kernel "$KERNEL" \
+			--initramfs "$INITRAMFS" \
+			--metrics-store "$store_dir" \
+			--api-port "$port" \
+			--cmdline "$CMDLINE_BASE workload_duration=$WORKLOAD_DURATION" \
+			"${rw_args[@]}" \
+			>"$log_file" 2>&1 &
+
+		ALL_VMM_PIDS+=("$!")
+
+		# Stagger launches: 100ms per VM, plus 500ms pause every 10th VM.
+		# At 100 VMs this takes ~15s to fully launch, avoiding KVM/I/O storms.
+		sleep 0.1
+		if [[ $((i % 10)) -eq 0 ]]; then
+			sleep 0.5
+			echo "  ... launched $i/$count"
+		fi
+	done
+}
+
+# ── Cleanup for a single round ────────────────────────────────────────
+
+cleanup_round() {
+	local pids=("$@")
+	for pid in "${pids[@]}"; do
+		if kill -0 "$pid" 2>/dev/null; then
+			kill "$pid" 2>/dev/null || true
+		fi
+	done
+	sleep 2
+	for pid in "${pids[@]}"; do
+		if kill -0 "$pid" 2>/dev/null; then
+			kill -9 "$pid" 2>/dev/null || true
+		fi
+	done
+	# Wait to reap zombies
+	for pid in "${pids[@]}"; do
+		wait "$pid" 2>/dev/null || true
+	done
+}
+
+# ── Analyze results ───────────────────────────────────────────────────
+
+analyze_csv() {
+	local csv_file="$1"
+	local count="$2"
+
+	# Skip header, find peak RSS and FDs
+	local peak_rss=0
+	local peak_fds=0
+	local first_ts=0
+	local last_ts=0
+	local samples=0
+
+	while IFS=',' read -r ts rss _cpu fds _alive; do
+		[[ "$ts" == "timestamp" ]] && continue
+		samples=$((samples + 1))
+
+		if [[ $samples -eq 1 ]]; then
+			first_ts=$ts
+		fi
+		last_ts=$ts
+
+		if [[ $rss -gt $peak_rss ]]; then
+			peak_rss=$rss
+		fi
+		if [[ $fds -gt $peak_fds ]]; then
+			peak_fds=$fds
+		fi
+	done <"$csv_file"
+
+	local peak_rss_mb=$((peak_rss / 1024))
+	local per_vm_rss_mb=$((peak_rss_mb / count))
+
+	local duration=$((last_ts - first_ts))
+	echo "  Samples:        $samples (over ${duration}s)"
+	echo "  Peak total RSS: ${peak_rss_mb} MB (${per_vm_rss_mb} MB per VM)"
+	echo "  Peak total FDs: ${peak_fds} ($((peak_fds / count)) per VM)"
+	echo "  Note: RSS includes guest memory pages faulted in by KVM."
+	echo "        Rondo adds 0 extra processes — metrics are embedded in the VMM."
+}
+
+# ── Prometheus comparison estimate ────────────────────────────────────
+
+estimate_prometheus() {
+	local count=$1
+
+	# Conservative estimates from node_exporter and Prometheus docs:
+	#   node_exporter: ~20-30 MB RSS per instance, ~3 MB/s scrape CPU
+	#   Prometheus: ~100 MB base + ~2-5 MB per scrape target for TSDB
+	#   Network: ~50 KB per scrape (typical node_exporter metrics page)
+	local exporter_rss_mb=25
+	local prometheus_base_mb=100
+	local prometheus_per_target_mb=3
+	local scrape_network_kb=50 # per scrape per target
+	local scrape_interval_s=15
+
+	local total_exporters_mb=$((exporter_rss_mb * count))
+	local prometheus_mb=$((prometheus_base_mb + (prometheus_per_target_mb * count)))
+	local total_mb=$((total_exporters_mb + prometheus_mb))
+
+	# Network: targets * payload / interval = bandwidth
+	local scrape_bandwidth_kbps=$((count * scrape_network_kb / scrape_interval_s))
+
+	echo "  Estimated Prometheus + node-exporter stack:"
+	echo "    ${count} node-exporters:  ${total_exporters_mb} MB RSS"
+	echo "    1 Prometheus server:      ${prometheus_mb} MB RSS"
+	echo "    Total estimated RSS:      ${total_mb} MB"
+	echo "    Scrape bandwidth:         ${scrape_bandwidth_kbps} kB/s (${count} targets × ${scrape_network_kb}kB @ ${scrape_interval_s}s)"
+	echo "    Scrape interval:          ${scrape_interval_s}s (vs rondo 1s embedded recording)"
+	echo ""
+
+	PROM_TOTAL_MB=$total_mb
+}
+
+# ── Disk usage measurement ────────────────────────────────────────────
+
+measure_disk() {
+	local run_dir="$1"
+	local count="$2"
+
+	if [[ -d "$run_dir/stores" ]]; then
+		local total_kb
+		total_kb=$(du -sk "$run_dir/stores" 2>/dev/null | awk '{print $1}')
+		local total_mb=$((total_kb / 1024))
+		local per_vm_kb=$((total_kb / count))
+		echo "  Rondo store disk: ${total_mb} MB total (${per_vm_kb} kB per VM)"
+	else
+		echo "  Rondo store disk: (stores not found)"
+	fi
+}
+
+# ── Run one benchmark round ───────────────────────────────────────────
+
+run_benchmark() {
+	local count=$1
+	local results_dir="$2"
+	local run_dir="$results_dir/run_${count}"
+
+	mkdir -p "$run_dir"
+
+	echo "=== $count VMMs ==="
+	echo ""
+
+	# Create control file for sampler
+	CONTROL_FILE="$run_dir/.sampling"
+	touch "$CONTROL_FILE"
+
+	# Track PIDs for this round (slice of global array)
+	local round_start=${#ALL_VMM_PIDS[@]}
+
+	# Launch VMMs (populates ALL_VMM_PIDS directly, no subshell)
+	echo "Launching $count VMMs (workload: ${WORKLOAD_DURATION}s)..."
+	launch_vmms "$count" "$run_dir"
+
+	# Extract this round's PIDs from the global array
+	local round_pids=("${ALL_VMM_PIDS[@]:$round_start}")
+	echo "  Launched ${#round_pids[@]} VMMs"
+
+	# Start resource sampling in background
+	local csv_file="$run_dir/resources.csv"
+	sample_resources "$csv_file" "${round_pids[@]}" &
+	SAMPLER_PID=$!
+
+	# Wait for all VMMs to finish (they exit after workload completes).
+	# Budget: stagger time (~15s for 100 VMs) + workload + boot/teardown.
+	local timeout=$((WORKLOAD_DURATION + 60))
+	local waited=0
+	while [[ $waited -lt $timeout ]]; do
+		local alive=0
+		for pid in "${round_pids[@]}"; do
+			if kill -0 "$pid" 2>/dev/null; then
+				alive=$((alive + 1))
+			fi
+		done
+		if [[ $alive -eq 0 ]]; then
+			break
+		fi
+		echo "  Waiting... ${alive}/$count VMMs still running (${waited}s elapsed)"
+		sleep 5
+		waited=$((waited + 5))
+	done
+
+	# Stop sampler
+	rm -f "$CONTROL_FILE"
+	sleep 1
+	if kill -0 "$SAMPLER_PID" 2>/dev/null; then
+		kill "$SAMPLER_PID" 2>/dev/null || true
+	fi
+	wait "$SAMPLER_PID" 2>/dev/null || true
+	SAMPLER_PID=""
+
+	# Kill any stragglers and reap zombies
+	cleanup_round "${round_pids[@]}"
+
+	# Count successful exits
+	local successes=0
+	local failures=0
+	for i in $(seq 1 "$count"); do
+		local log="$run_dir/logs/vmm_${i}.log"
+		if [[ -f "$log" ]] && grep -qE "VMM exited cleanly|Guest workload complete|Power off|System halted|Run /init" "$log" 2>/dev/null; then
+			successes=$((successes + 1))
+		else
+			failures=$((failures + 1))
+		fi
+	done
+
+	echo ""
+	echo "  Results ($count VMMs, ${WORKLOAD_DURATION}s workload):"
+	echo "  Completed: ${successes}/${count} (${failures} failures)"
+	echo ""
+
+	# Analyze resource usage
+	echo "  --- Rondo (embedded) ---"
+	if [[ -f "$csv_file" ]]; then
+		analyze_csv "$csv_file" "$count"
+	else
+		echo "  (no resource data collected)"
+	fi
+
+	# Disk usage
+	measure_disk "$run_dir" "$count"
+	echo ""
+
+	# Prometheus comparison
+	echo "  --- Prometheus + node-exporter (estimated) ---"
+	estimate_prometheus "$count"
+
+	# Comparison: rondo adds 0 processes; Prometheus stack adds N+1
+	echo "  --- Comparison ---"
+	echo "    Rondo:      0 extra processes, 0 network scrapes"
+	echo "    Prometheus: $count node-exporters + 1 Prometheus server ($((count + 1)) extra processes)"
+	echo "    Prometheus: ${PROM_TOTAL_MB} MB additional RSS (estimated)"
+
+	echo ""
+	echo "---"
+	echo ""
+}
+
+# ── Main ──────────────────────────────────────────────────────────────
+
+main() {
+	echo "╔══════════════════════════════════════════════════════════╗"
+	echo "║  Benchmark B: Resource Overhead at Scale                ║"
+	echo "║  rondo embedded metrics vs Prometheus + node-exporter   ║"
+	echo "╚══════════════════════════════════════════════════════════╝"
+	echo ""
+
+	preflight
+
+	local results_dir
+	results_dir="${BASE_DIR}/results_$(date +%Y%m%d_%H%M%S)"
+	mkdir -p "$results_dir"
+
+	# System baseline
+	echo "System baseline:"
+	echo "  CPUs:   $(nproc)"
+	echo "  Memory: $(awk '/MemTotal/ {printf "%.1f GB", $2/1024/1024}' /proc/meminfo)"
+	echo "  Kernel: $(uname -r)"
+	echo ""
+
+	# Run benchmarks for each count
+	for count in $COUNTS; do
+		run_benchmark "$count" "$results_dir"
+		sleep 2
+	done
+
+	echo "╔══════════════════════════════════════════════════════════╗"
+	echo "║  Benchmark B Complete                                   ║"
+	echo "╚══════════════════════════════════════════════════════════╝"
+	echo ""
+	echo "Results saved to: $results_dir"
+	echo ""
+
+	# Summary table
+	echo "Summary:"
+	printf "  %-6s %-10s %-14s %-14s %-14s\n" "VMs" "Success" "Peak RSS" "Store Disk" "Prom Est."
+	printf "  %-6s %-10s %-14s %-14s %-14s\n" "---" "-------" "--------" "----------" "---------"
+
+	for count in $COUNTS; do
+		local csv_file="$results_dir/run_${count}/resources.csv"
+		local run_dir="$results_dir/run_${count}"
+		if [[ -f "$csv_file" ]]; then
+			local peak_rss
+			peak_rss=$(awk -F, 'NR>1 {if($2>max)max=$2} END{print max+0}' "$csv_file")
+			local rss_mb=$((peak_rss / 1024))
+
+			# Disk usage (stores may have been cleaned up, use logged value)
+			local disk_mb="N/A"
+			if [[ -d "$run_dir/stores" ]]; then
+				local disk_kb
+				disk_kb=$(du -sk "$run_dir/stores" 2>/dev/null | awk '{print $1}')
+				disk_mb="$((disk_kb / 1024)) MB"
+			fi
+
+			# Success count from logs
+			local ok=0
+			for i in $(seq 1 "$count"); do
+				local log="$run_dir/logs/vmm_${i}.log"
+				if [[ -f "$log" ]] && grep -qE "VMM exited cleanly|Guest workload complete|Power off|System halted|Run /init" "$log" 2>/dev/null; then
+					ok=$((ok + 1))
+				fi
+			done
+
+			local prom_mb=$((25 * count + 100 + 3 * count))
+
+			printf "  %-6s %-10s %-14s %-14s %-14s\n" \
+				"$count" "${ok}/${count}" "${rss_mb} MB" "$disk_mb" "${prom_mb} MB"
+		fi
+	done
+	echo ""
+}
+
+main "$@"

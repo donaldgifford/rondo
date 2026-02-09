@@ -32,3 +32,6 @@ target
 *.prof
 *.svg
 
+# Example output
+consolidation_demo_store/
+

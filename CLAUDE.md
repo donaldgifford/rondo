@@ -69,7 +69,7 @@ The storage engine is built around these core abstractions (see `docs/MVP.md` fo
 
 ## Coding Standards
 
-- **Edition**: Rust 2024, MSRV 1.92
+- **Edition**: Rust 2024, MSRV 1.93
 - **Line width**: 100 characters (rustfmt.toml)
 - **Unsafe**: All unsafe blocks must have `// SAFETY:` comments (`undocumented_unsafe_blocks = "deny"`). Unsafe ops in unsafe fns are denied.
 - **Docs**: `missing_docs` is warned — all public items need doc comments
@@ -90,9 +90,49 @@ Three GitHub Actions workflows in `.github/workflows/`:
 - Trunk-based development on `main`
 - Dual license: MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`)
 
+## Remote VMM Development
+
+The demo VMM (`rondo-demo-vmm`) requires Linux/KVM and is developed on a remote Linux box. **Always use Makefile targets for remote operations** — never SSH directly.
+
+```bash
+# Remote operations (all via Makefile)
+make vmm-sync                     # rsync source to remote
+make vmm-build                    # sync + build on remote
+make vmm-build-release            # sync + release build
+make vmm-test                     # sync + run all tests
+make vmm-test-vmm                 # sync + run VMM tests only
+make vmm-clippy                   # sync + clippy on remote
+make vmm-run ARGS="--kernel ..."  # sync + build + run VMM
+make vmm-demo                     # full demo: build + guest + run + query metrics
+make vmm-demo-query               # query metrics store from previous demo run
+make vmm-demo-remote-write        # demo with Prometheus remote-write export (45s workload)
+make vmm-guest                    # sync + build guest initramfs
+make vmm-bench                    # sync + run write-path benchmarks
+make vmm-bench-15                 # 15s VM lifecycle benchmark
+make vmm-bench-30                 # 30s VM lifecycle benchmark
+make vmm-bench-45                 # 45s VM lifecycle benchmark
+make vmm-bench-capture            # run all lifecycle benchmarks (15/30/45s)
+make vmm-shell                    # open SSH shell on remote
+make vmm-ssh CMD="..."            # run arbitrary command on remote
+make vmm-check-kvm                # verify KVM availability
+```
+
+**Important**: `vmm-run` and `vmm-build` do `rsync --delete` which removes guest build artifacts (`out/`). Rebuild the guest after sync with `make vmm-guest`, or use `make vmm-ssh CMD="..."` to avoid re-syncing.
+
+**Remote environment**: The remote box pushes metrics to Prometheus via remote-write. Grafana dashboard is deployed via grafana-operator CRDs. See `deploy/README.md` for the full pipeline setup.
+
+## Monitoring / Deploy
+
+K8s manifests for the metrics pipeline live in `deploy/`:
+- `deploy/k8s/` — GrafanaDashboard CR + ConfigMap (apply with `kubectl apply -f deploy/k8s/`)
+- `deploy/grafana/` — Dashboard JSON source of truth
+- `deploy/README.md` — Setup guide
+
 ## Key Design Documents
 
 - `docs/VISION.md` — Project vision and non-goals
 - `docs/MVP.md` — Detailed MVP plan with API surface, storage layout, and milestones
 - `docs/MVP-ALT.md` — Alternative design exploration
 - `docs/REPO_SETUP.md` — Full development guide, CI specs, testing strategy
+- `docs/IMPLEMENTATION.md` — Phase-by-phase implementation tracker
+- `docs/BENCHMARK_PLAN.md` — Benchmark readiness plan (lifecycle benchmarks, scale investigation)
