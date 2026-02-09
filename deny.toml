@@ -1,7 +1,6 @@
 # deny.toml
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
+unmaintained = "workspace"
 yanked = "deny"
 
 [licenses]
@@ -13,9 +12,8 @@ allow = [
   "ISC",
   "Unicode-3.0",
   "Zlib",
+  "CDLA-Permissive-2.0",
 ]
-copyleft = "deny"
-unlicensed = "deny"
 
 [bans]
 multiple-versions = "warn" # flag duplicate versions in the tree

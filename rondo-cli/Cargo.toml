@@ -9,7 +9,7 @@ keywords = ["time-series", "metrics", "embedded", "round-robin", "monitoring"]
 categories = ["database", "embedded"]
 
 [dependencies]
-rondo = { path = "../rondo" }
+rondo = { path = "../rondo", version = "0.0.1" }
 clap = { workspace = true }
 serde_json = { workspace = true }
 
