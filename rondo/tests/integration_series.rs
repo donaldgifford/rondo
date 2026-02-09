@@ -59,8 +59,14 @@ fn test_series_registration_integration() -> Result<()> {
 
     // Verify slab state
     assert_eq!(slab.series_count(), 2);
-    assert_eq!(slab.get_series_column(handle1.series_id), Some(handle1.column));
-    assert_eq!(slab.get_series_column(handle2.series_id), Some(handle2.column));
+    assert_eq!(
+        slab.get_series_column(handle1.series_id),
+        Some(handle1.column)
+    );
+    assert_eq!(
+        slab.get_series_column(handle2.series_id),
+        Some(handle2.column)
+    );
 
     // Test persistence
     let index_path = temp_dir.path().join("series_index.json");
@@ -73,7 +79,9 @@ fn test_series_registration_integration() -> Result<()> {
     assert_eq!(loaded_registry.total_series_count(), 2);
 
     let loaded_handle1 = loaded_registry.get_handle("cpu.usage", &labels1).unwrap();
-    let loaded_handle2 = loaded_registry.get_handle("memory.usage", &labels2).unwrap();
+    let loaded_handle2 = loaded_registry
+        .get_handle("memory.usage", &labels2)
+        .unwrap();
 
     assert_eq!(handle1, loaded_handle1);
     assert_eq!(handle2, loaded_handle2);

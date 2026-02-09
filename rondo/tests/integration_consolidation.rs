@@ -88,7 +88,10 @@ fn test_15_minutes_consolidation_to_tier1() {
         total_ops += ops;
     }
 
-    assert!(total_ops > 0, "Should have performed consolidation operations");
+    assert!(
+        total_ops > 0,
+        "Should have performed consolidation operations"
+    );
 
     // Query tier 1 (10s averages)
     let tier1_result = store
@@ -139,7 +142,9 @@ fn test_tier_cascade() {
         for i in 0u32..40 {
             let offset = batch * 40 + i;
             let timestamp = BASE_TIME + u64::from(offset) * 1_000_000_000;
-            store.record(handle, f64::from(offset * 10), timestamp).unwrap();
+            store
+                .record(handle, f64::from(offset * 10), timestamp)
+                .unwrap();
         }
 
         // Consolidate until quiescent after each batch.
@@ -466,7 +471,11 @@ fn test_query_auto_selects_best_tier() {
     );
 
     let data: Vec<_> = result.collect();
-    assert_eq!(data.len(), 29, "Should get 29 data points from tier 0 (end exclusive)");
+    assert_eq!(
+        data.len(),
+        29,
+        "Should get 29 data points from tier 0 (end exclusive)"
+    );
 }
 
 /// Verify consolidation is idempotent — repeated calls with no new data do nothing.
@@ -489,7 +498,10 @@ fn test_consolidation_idempotent() {
 
     // Second pass — no new data
     let ops2 = store.consolidate().unwrap();
-    assert_eq!(ops2, 0, "Second consolidation with no new data should be a no-op");
+    assert_eq!(
+        ops2, 0,
+        "Second consolidation with no new data should be a no-op"
+    );
 
     // Third pass — still no-op
     let ops3 = store.consolidate().unwrap();
@@ -529,8 +541,14 @@ fn test_consolidation_multiple_series() {
         .collect();
 
     // Both series should have consolidated data
-    assert!(!s1_data.is_empty(), "Series 1 should have consolidated data");
-    assert!(!s2_data.is_empty(), "Series 2 should have consolidated data");
+    assert!(
+        !s1_data.is_empty(),
+        "Series 1 should have consolidated data"
+    );
+    assert!(
+        !s2_data.is_empty(),
+        "Series 2 should have consolidated data"
+    );
 
     // Verify they have different consolidated values
     assert!(

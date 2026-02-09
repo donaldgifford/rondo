@@ -65,10 +65,14 @@ fn main() -> Result<()> {
     let cpu_handle1 = registry.register("cpu.usage_percent", &cpu_web1_labels)?;
     let cpu_handle2 = registry.register("cpu.usage_percent", &cpu_web2_labels)?;
 
-    println!("   CPU web1: schema={}, series_id={}, column={}",
-             cpu_handle1.schema_index, cpu_handle1.series_id, cpu_handle1.column);
-    println!("   CPU web2: schema={}, series_id={}, column={}",
-             cpu_handle2.schema_index, cpu_handle2.series_id, cpu_handle2.column);
+    println!(
+        "   CPU web1: schema={}, series_id={}, column={}",
+        cpu_handle1.schema_index, cpu_handle1.series_id, cpu_handle1.column
+    );
+    println!(
+        "   CPU web2: schema={}, series_id={}, column={}",
+        cpu_handle2.schema_index, cpu_handle2.series_id, cpu_handle2.column
+    );
 
     // Register memory metrics
     let memory_web1_labels = vec![
@@ -79,13 +83,16 @@ fn main() -> Result<()> {
 
     let memory_handle = registry.register("memory.usage_bytes", &memory_web1_labels)?;
 
-    println!("   Memory web1: schema={}, series_id={}, column={}",
-             memory_handle.schema_index, memory_handle.series_id, memory_handle.column);
+    println!(
+        "   Memory web1: schema={}, series_id={}, column={}",
+        memory_handle.schema_index, memory_handle.series_id, memory_handle.column
+    );
 
     // Demonstrate lookup by labels
     println!("\n🔍 Testing lookups...");
 
-    let found_handle = registry.get_handle("cpu.usage_percent", &cpu_web1_labels)
+    let found_handle = registry
+        .get_handle("cpu.usage_percent", &cpu_web1_labels)
         .expect("Should find registered series");
     assert_eq!(found_handle, cpu_handle1);
     println!("   ✅ Found existing series by labels");
@@ -97,7 +104,10 @@ fn main() -> Result<()> {
 
     // Display series info
     if let Some(info) = registry.series_info(&cpu_handle1) {
-        println!("   📋 Series info: name='{}', labels={:?}", info.name, info.labels);
+        println!(
+            "   📋 Series info: name='{}', labels={:?}",
+            info.name, info.labels
+        );
     }
 
     // Show registry statistics
@@ -137,8 +147,14 @@ fn main() -> Result<()> {
     // Sync registry to slabs
     registry.sync_to_slabs(&mut [&mut cpu_slab, &mut memory_slab])?;
 
-    println!("   ✅ CPU slab: {} series registered", cpu_slab.series_count());
-    println!("   ✅ Memory slab: {} series registered", memory_slab.series_count());
+    println!(
+        "   ✅ CPU slab: {} series registered",
+        cpu_slab.series_count()
+    );
+    println!(
+        "   ✅ Memory slab: {} series registered",
+        memory_slab.series_count()
+    );
 
     // Verify slab series directory is updated
     assert_eq!(
@@ -155,9 +171,13 @@ fn main() -> Result<()> {
 
     // Load it back to verify persistence
     let loaded_registry = SeriesRegistry::load(&index_path, vec![cpu_schema, memory_schema])?;
-    assert_eq!(loaded_registry.total_series_count(), registry.total_series_count());
+    assert_eq!(
+        loaded_registry.total_series_count(),
+        registry.total_series_count()
+    );
 
-    let loaded_handle = loaded_registry.get_handle("cpu.usage_percent", &cpu_web1_labels)
+    let loaded_handle = loaded_registry
+        .get_handle("cpu.usage_percent", &cpu_web1_labels)
         .expect("Should find series in loaded registry");
     assert_eq!(loaded_handle, cpu_handle1);
     println!("   ✅ Series index loaded and verified");

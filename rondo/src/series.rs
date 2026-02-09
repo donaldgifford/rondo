@@ -273,11 +273,7 @@ impl SeriesRegistry {
     /// println!("Series assigned to column {}", handle.column);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn register(
-        &mut self,
-        name: &str,
-        labels: &[(String, String)],
-    ) -> Result<SeriesHandle> {
+    pub fn register(&mut self, name: &str, labels: &[(String, String)]) -> Result<SeriesHandle> {
         // Validate inputs
         self.validate_name(name)?;
         self.validate_labels(labels)?;
@@ -359,7 +355,9 @@ impl SeriesRegistry {
     /// Series information if the handle is valid, `None` otherwise.
     pub fn series_info(&self, handle: &SeriesHandle) -> Option<&SeriesInfo> {
         // Find series info by searching for matching handle
-        self.series_map.values().find(|info| info.handle() == *handle)
+        self.series_map
+            .values()
+            .find(|info| info.handle() == *handle)
     }
 
     /// Returns the number of registered series for a schema.
@@ -445,11 +443,9 @@ impl SeriesRegistry {
         let json = serde_json::to_string_pretty(&index)
             .map_err(crate::error::StoreError::MetadataSerialize)?;
 
-        std::fs::write(path, json).map_err(|e| {
-            crate::error::StoreError::DirectoryAccess {
-                path: "series_index.bin".to_string(),
-                source: e,
-            }
+        std::fs::write(path, json).map_err(|e| crate::error::StoreError::DirectoryAccess {
+            path: "series_index.bin".to_string(),
+            source: e,
         })?;
 
         Ok(())
@@ -482,8 +478,8 @@ impl SeriesRegistry {
             }
         })?;
 
-        let index: SeriesIndex = serde_json::from_str(&json)
-            .map_err(crate::error::StoreError::MetadataSerialize)?;
+        let index: SeriesIndex =
+            serde_json::from_str(&json).map_err(crate::error::StoreError::MetadataSerialize)?;
 
         // Validate schema count matches
         if schemas.len() != index.next_series_id.len() {
@@ -622,13 +618,7 @@ mod tests {
 
     #[test]
     fn test_series_info() {
-        let info = SeriesInfo::new(
-            "cpu.usage".to_string(),
-            test_labels(),
-            0,
-            1,
-            5,
-        );
+        let info = SeriesInfo::new("cpu.usage".to_string(), test_labels(), 0, 1, 5);
 
         assert_eq!(info.name, "cpu.usage");
         assert_eq!(info.labels, test_labels());
@@ -734,7 +724,10 @@ mod tests {
         // Second should fail
         let result = registry.register("cpu.usage", &labels2);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), crate::error::RondoError::Series(SeriesError::MaxSeriesExceeded { .. })));
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::error::RondoError::Series(SeriesError::MaxSeriesExceeded { .. })
+        ));
     }
 
     #[test]
@@ -746,7 +739,10 @@ mod tests {
 
         let result = registry.register("mem.usage", &labels);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), crate::error::RondoError::Series(SeriesError::NoMatchingSchema { .. })));
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::error::RondoError::Series(SeriesError::NoMatchingSchema { .. })
+        ));
     }
 
     #[test]
@@ -864,8 +860,12 @@ mod tests {
         assert_eq!(loaded_registry.series_count(1), 1); // Memory schema
 
         // Verify handles work
-        let loaded_cpu_handle = loaded_registry.get_handle("cpu.usage", &cpu_labels).unwrap();
-        let loaded_mem_handle = loaded_registry.get_handle("mem.usage", &mem_labels).unwrap();
+        let loaded_cpu_handle = loaded_registry
+            .get_handle("cpu.usage", &cpu_labels)
+            .unwrap();
+        let loaded_mem_handle = loaded_registry
+            .get_handle("mem.usage", &mem_labels)
+            .unwrap();
 
         assert_eq!(cpu_handle, loaded_cpu_handle);
         assert_eq!(mem_handle, loaded_mem_handle);

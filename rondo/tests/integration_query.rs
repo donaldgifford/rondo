@@ -44,8 +44,12 @@ fn test_query_integration() {
     let base_time = 1_640_000_000_000_000_000u64;
     for i in 0u32..10 {
         let timestamp = base_time + u64::from(i) * 1_000_000_000; // 1 second intervals
-        store.record(cpu_handle, f64::from(i * 10), timestamp).unwrap();
-        store.record(mem_handle, f64::from(i * 5), timestamp).unwrap();
+        store
+            .record(cpu_handle, f64::from(i * 10), timestamp)
+            .unwrap();
+        store
+            .record(mem_handle, f64::from(i * 5), timestamp)
+            .unwrap();
     }
 
     // Test direct tier query
@@ -70,7 +74,11 @@ fn test_query_integration() {
 
     // Test auto-tier selection
     let result = store
-        .query_auto(mem_handle, base_time + 2_000_000_000, base_time + 8_000_000_000)
+        .query_auto(
+            mem_handle,
+            base_time + 2_000_000_000,
+            base_time + 8_000_000_000,
+        )
         .unwrap();
 
     assert_eq!(result.tier_used(), 0); // Should use high-res tier
@@ -79,7 +87,12 @@ fn test_query_integration() {
 
     // Test query metadata
     let result = store
-        .query(cpu_handle, 0, base_time - 5_000_000_000, base_time + 15_000_000_000)
+        .query(
+            cpu_handle,
+            0,
+            base_time - 5_000_000_000,
+            base_time + 15_000_000_000,
+        )
         .unwrap();
 
     assert_eq!(result.tier_used(), 0);

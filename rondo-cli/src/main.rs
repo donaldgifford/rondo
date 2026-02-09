@@ -117,34 +117,26 @@ fn cmd_info(store_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
                 .get("max_series")
                 .and_then(|m| m.as_u64())
                 .unwrap_or(0);
-            let hash = schema
-                .get("hash")
-                .and_then(|h| h.as_u64())
-                .unwrap_or(0);
+            let hash = schema.get("hash").and_then(|h| h.as_u64()).unwrap_or(0);
 
             println!("  Schema {i}: \"{name}\"");
             println!("    Max series: {max_series}");
             println!("    Hash: {hash:016x}");
 
             // List tiers from metadata
-            if let Some(tiers) = schema
-                .get("tiers")
-                .and_then(|t| t.as_array())
-            {
+            if let Some(tiers) = schema.get("tiers").and_then(|t| t.as_array()) {
                 println!("    Tiers: {}", tiers.len());
                 for (j, tier) in tiers.iter().enumerate() {
                     // Durations are serialized as f64 seconds via duration_serde
                     let interval_secs = tier.get("interval").and_then(|i| i.as_f64());
                     let retention_secs = tier.get("retention").and_then(|r| r.as_f64());
-                    let consolidation_fn = tier
-                        .get("consolidation_fn")
-                        .and_then(|c| {
-                            if c.is_null() {
-                                None
-                            } else {
-                                c.as_str().map(|s| s.to_string())
-                            }
-                        });
+                    let consolidation_fn = tier.get("consolidation_fn").and_then(|c| {
+                        if c.is_null() {
+                            None
+                        } else {
+                            c.as_str().map(|s| s.to_string())
+                        }
+                    });
 
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     let interval_str = interval_secs
@@ -155,18 +147,24 @@ fn cmd_info(store_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
                         .map(|s| format_duration_secs(s as u64))
                         .unwrap_or_else(|| "?".to_string());
 
-                    let fn_str = consolidation_fn
-                        .as_deref()
-                        .unwrap_or("none (raw)");
+                    let fn_str = consolidation_fn.as_deref().unwrap_or("none (raw)");
 
-                    println!("      Tier {j}: interval={interval_str}, retention={retention_str}, fn={fn_str}");
+                    println!(
+                        "      Tier {j}: interval={interval_str}, retention={retention_str}, fn={fn_str}"
+                    );
 
                     // Check for slab file and print size
-                    let slab_path = store_path.join(format!("schema_{i}")).join(format!("tier_{j}.slab"));
+                    let slab_path = store_path
+                        .join(format!("schema_{i}"))
+                        .join(format!("tier_{j}.slab"));
                     if slab_path.exists()
                         && let Ok(metadata) = std::fs::metadata(&slab_path)
                     {
-                        println!("        Slab: {} ({} bytes)", slab_path.display(), metadata.len());
+                        println!(
+                            "        Slab: {} ({} bytes)",
+                            slab_path.display(),
+                            metadata.len()
+                        );
                     }
                 }
             }
@@ -176,7 +174,10 @@ fn cmd_info(store_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
 
     // Calculate total disk size
     let total_size = dir_size(store_path)?;
-    println!("Total disk usage: {} ({total_size} bytes)", format_bytes(total_size));
+    println!(
+        "Total disk usage: {} ({total_size} bytes)",
+        format_bytes(total_size)
+    );
 
     // Show consolidation cursor state
     let cursor_path = store_path.join("consolidation_cursors.json");
@@ -197,10 +198,14 @@ fn cmd_info(store_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
                     let labels_str = if labels.is_empty() {
                         String::new()
                     } else {
-                        let pairs: Vec<_> = labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                        let pairs: Vec<_> =
+                            labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
                         format!(" {{{}}}", pairs.join(", "))
                     };
-                    println!("  - {name}{labels_str} (schema={}, column={})", handle.schema_index, handle.column);
+                    println!(
+                        "  - {name}{labels_str} (schema={}, column={})",
+                        handle.schema_index, handle.column
+                    );
                 }
             }
         }
@@ -267,7 +272,10 @@ fn cmd_query(
 
     match format {
         OutputFormat::Csv => {
-            println!("# series={series_name}, tier={tier_used}, points={}", data.len());
+            println!(
+                "# series={series_name}, tier={tier_used}, points={}",
+                data.len()
+            );
             println!("timestamp_ns,value");
             for (ts, val) in &data {
                 println!("{ts},{val}");

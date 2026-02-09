@@ -84,9 +84,7 @@ fn handle_info(
     stream: &std::net::TcpStream,
     metrics: &Arc<Mutex<VmMetrics>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let m = metrics
-        .lock()
-        .map_err(|e| format!("lock: {e}"))?;
+    let m = metrics.lock().map_err(|e| format!("lock: {e}"))?;
     let store = m.store();
     let handles = store.handles();
 
@@ -111,9 +109,7 @@ fn handle_query(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let params = parse_query(query);
 
-    let series_name = params
-        .get("series")
-        .ok_or("missing 'series' parameter")?;
+    let series_name = params.get("series").ok_or("missing 'series' parameter")?;
     let start: u64 = params
         .get("start")
         .and_then(|s| s.parse().ok())
@@ -127,14 +123,11 @@ fn handle_query(
     let store = m.store();
 
     // Find the series handle by name
-    let handle = store
-        .handles()
-        .into_iter()
-        .find(|h| {
-            store
-                .series_info(h)
-                .is_some_and(|(name, _)| name == series_name.as_str())
-        });
+    let handle = store.handles().into_iter().find(|h| {
+        store
+            .series_info(h)
+            .is_some_and(|(name, _)| name == series_name.as_str())
+    });
 
     let handle = match handle {
         Some(h) => h,
@@ -150,9 +143,7 @@ fn handle_query(
     // Query tier 0 (highest resolution)
     let result = store.query(handle, 0, start, end)?;
     let points: Vec<serde_json::Value> = result
-        .map(|(ts, val)| {
-            serde_json::json!({"t": ts, "v": val})
-        })
+        .map(|(ts, val)| serde_json::json!({"t": ts, "v": val}))
         .collect();
 
     let body = serde_json::json!({

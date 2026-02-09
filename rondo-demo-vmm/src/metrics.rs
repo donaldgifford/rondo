@@ -327,7 +327,10 @@ mod tests {
             .unwrap();
 
         // Query back the IO exit counter
-        let result = metrics.store().query(metrics.vcpu_exits_io, 0, ts, ts + 1).unwrap();
+        let result = metrics
+            .store()
+            .query(metrics.vcpu_exits_io, 0, ts, ts + 1)
+            .unwrap();
         let points: Vec<_> = result.collect();
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].1, 1.0);
@@ -349,7 +352,10 @@ mod tests {
             .unwrap();
 
         // Query back the read bytes
-        let result = metrics.store().query(metrics.blk_bytes_read, 0, ts, ts + 1).unwrap();
+        let result = metrics
+            .store()
+            .query(metrics.blk_bytes_read, 0, ts, ts + 1)
+            .unwrap();
         let points: Vec<_> = result.collect();
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].1, 4096.0);
@@ -367,7 +373,10 @@ mod tests {
             .record_process_stats(50_000_000.0, 42.0, 3600.0, ts)
             .unwrap();
 
-        let result = metrics.store().query(metrics.vmm_rss_bytes, 0, ts, ts + 1).unwrap();
+        let result = metrics
+            .store()
+            .query(metrics.vmm_rss_bytes, 0, ts, ts + 1)
+            .unwrap();
         let points: Vec<_> = result.collect();
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].1, 50_000_000.0);
@@ -385,7 +394,12 @@ mod tests {
         for i in 0u32..20 {
             let ts = base_ts + u64::from(i) * 1_000_000_000;
             metrics
-                .record_vcpu_exit(VcpuExitReason::Io, f64::from(i * 100), f64::from(i * 1000), ts)
+                .record_vcpu_exit(
+                    VcpuExitReason::Io,
+                    f64::from(i * 100),
+                    f64::from(i * 1000),
+                    ts,
+                )
                 .unwrap();
         }
 
@@ -413,7 +427,10 @@ mod tests {
         // Reopen and query
         {
             let metrics = VmMetrics::open(&store_path).unwrap();
-            let result = metrics.store().query(metrics.vmm_rss_bytes, 0, ts, ts + 1).unwrap();
+            let result = metrics
+                .store()
+                .query(metrics.vmm_rss_bytes, 0, ts, ts + 1)
+                .unwrap();
             let points: Vec<_> = result.collect();
             assert_eq!(points.len(), 1);
             assert_eq!(points[0].1, 100_000.0);

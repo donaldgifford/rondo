@@ -260,12 +260,7 @@ mod tests {
     #[test]
     fn test_analyze_coverage_full_coverage() {
         // Available: 1000..5000, Requested: 2000..4000
-        let (fully_covered, incomplete) = analyze_coverage(
-            Some(1000),
-            Some(5000),
-            2000,
-            4000,
-        );
+        let (fully_covered, incomplete) = analyze_coverage(Some(1000), Some(5000), 2000, 4000);
         assert!(fully_covered);
         assert!(!incomplete);
     }
@@ -273,12 +268,7 @@ mod tests {
     #[test]
     fn test_analyze_coverage_starts_too_early() {
         // Available: 2000..5000, Requested: 1000..4000
-        let (fully_covered, incomplete) = analyze_coverage(
-            Some(2000),
-            Some(5000),
-            1000,
-            4000,
-        );
+        let (fully_covered, incomplete) = analyze_coverage(Some(2000), Some(5000), 1000, 4000);
         assert!(!fully_covered);
         assert!(incomplete);
     }
@@ -286,12 +276,7 @@ mod tests {
     #[test]
     fn test_analyze_coverage_ends_too_late() {
         // Available: 1000..3000, Requested: 2000..5000
-        let (fully_covered, incomplete) = analyze_coverage(
-            Some(1000),
-            Some(3000),
-            2000,
-            5000,
-        );
+        let (fully_covered, incomplete) = analyze_coverage(Some(1000), Some(3000), 2000, 5000);
         assert!(!fully_covered);
         assert!(!incomplete); // Ending after newest is normal for real-time queries
     }
@@ -306,12 +291,7 @@ mod tests {
     #[test]
     fn test_analyze_coverage_exact_match() {
         // Available: 1000..2000, Requested: 1000..2000
-        let (fully_covered, incomplete) = analyze_coverage(
-            Some(1000),
-            Some(2000),
-            1000,
-            2000,
-        );
+        let (fully_covered, incomplete) = analyze_coverage(Some(1000), Some(2000), 1000, 2000);
         assert!(fully_covered);
         assert!(!incomplete);
     }
@@ -319,12 +299,7 @@ mod tests {
     #[test]
     fn test_analyze_coverage_request_before_data() {
         // Available: 2000..3000, Requested: 500..1000
-        let (fully_covered, incomplete) = analyze_coverage(
-            Some(2000),
-            Some(3000),
-            500,
-            1000,
-        );
+        let (fully_covered, incomplete) = analyze_coverage(Some(2000), Some(3000), 500, 1000);
         assert!(!fully_covered);
         assert!(incomplete);
     }

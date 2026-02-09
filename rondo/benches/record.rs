@@ -6,7 +6,7 @@
 
 #![allow(missing_docs, clippy::cast_possible_truncation)]
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use rondo::schema::{LabelMatcher, SchemaConfig, TierConfig};
 use rondo::store::Store;
 use std::time::Duration;
@@ -20,13 +20,11 @@ fn setup_store(series_count: u32) -> (Store, Vec<rondo::SeriesHandle>, tempfile:
     let schemas = vec![SchemaConfig {
         name: "bench".to_string(),
         label_matcher: LabelMatcher::any(),
-        tiers: vec![
-            TierConfig {
-                interval: Duration::from_secs(1),
-                retention: Duration::from_secs(600),
-                consolidation_fn: None,
-            },
-        ],
+        tiers: vec![TierConfig {
+            interval: Duration::from_secs(1),
+            retention: Duration::from_secs(600),
+            consolidation_fn: None,
+        }],
         max_series: series_count + 10,
     }];
 
@@ -56,7 +54,9 @@ fn bench_record_single(c: &mut Criterion) {
     c.bench_function("record/single_series", |b| {
         b.iter(|| {
             ts += 1_000_000_000;
-            store.record(black_box(handle), black_box(42.5), black_box(ts)).unwrap();
+            store
+                .record(black_box(handle), black_box(42.5), black_box(ts))
+                .unwrap();
         });
     });
 }
@@ -105,7 +105,9 @@ fn bench_record_batch(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, _| {
             b.iter(|| {
                 ts += 1_000_000_000;
-                store.record_batch(black_box(&entries), black_box(ts)).unwrap();
+                store
+                    .record_batch(black_box(&entries), black_box(ts))
+                    .unwrap();
             });
         });
     }
@@ -122,7 +124,9 @@ fn bench_record_throughput(c: &mut Criterion) {
         b.iter(|| {
             ts += 1_000_000_000;
             for handle in &handles {
-                store.record(black_box(*handle), black_box(99.9), black_box(ts)).unwrap();
+                store
+                    .record(black_box(*handle), black_box(99.9), black_box(ts))
+                    .unwrap();
             }
         });
     });

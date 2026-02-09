@@ -69,25 +69,45 @@ impl ConsolidationCursors {
     }
 
     /// Gets the cursor for a specific tier pair, if it exists.
-    pub fn get_cursor(&self, schema_index: usize, source_tier: usize, dest_tier: usize) -> Option<&ConsolidationCursor> {
+    pub fn get_cursor(
+        &self,
+        schema_index: usize,
+        source_tier: usize,
+        dest_tier: usize,
+    ) -> Option<&ConsolidationCursor> {
         let key = Self::cursor_key(schema_index, source_tier, dest_tier);
         self.cursors.get(&key)
     }
 
     /// Sets the cursor for a specific tier pair.
     pub fn set_cursor(&mut self, cursor: ConsolidationCursor) {
-        let key = Self::cursor_key(cursor.schema_index, cursor.source_tier_index, cursor.dest_tier_index);
+        let key = Self::cursor_key(
+            cursor.schema_index,
+            cursor.source_tier_index,
+            cursor.dest_tier_index,
+        );
         self.cursors.insert(key, cursor);
     }
 
     /// Gets the last processed timestamp for a tier pair, or None if no cursor exists.
-    pub fn get_last_processed(&self, schema_index: usize, source_tier: usize, dest_tier: usize) -> Option<u64> {
+    pub fn get_last_processed(
+        &self,
+        schema_index: usize,
+        source_tier: usize,
+        dest_tier: usize,
+    ) -> Option<u64> {
         self.get_cursor(schema_index, source_tier, dest_tier)
             .map(|cursor| cursor.last_processed_timestamp)
     }
 
     /// Updates the last processed timestamp for a tier pair.
-    pub fn update_last_processed(&mut self, schema_index: usize, source_tier: usize, dest_tier: usize, timestamp: u64) {
+    pub fn update_last_processed(
+        &mut self,
+        schema_index: usize,
+        source_tier: usize,
+        dest_tier: usize,
+        timestamp: u64,
+    ) {
         let cursor = ConsolidationCursor {
             schema_index,
             source_tier_index: source_tier,
@@ -108,19 +128,16 @@ impl ConsolidationCursors {
             return Ok(Self::default());
         }
 
-        let content = fs::read_to_string(path).map_err(|e| {
-            ConsolidationError::CursorLoad {
-                path: path.display().to_string(),
-                source: e,
-            }
+        let content = fs::read_to_string(path).map_err(|e| ConsolidationError::CursorLoad {
+            path: path.display().to_string(),
+            source: e,
         })?;
 
-        let cursors: ConsolidationCursors = serde_json::from_str(&content).map_err(|e| {
-            ConsolidationError::CursorParse {
+        let cursors: ConsolidationCursors =
+            serde_json::from_str(&content).map_err(|e| ConsolidationError::CursorParse {
                 path: path.display().to_string(),
                 source: e,
-            }
-        })?;
+            })?;
 
         Ok(cursors)
     }
@@ -132,17 +149,12 @@ impl ConsolidationCursors {
     /// Returns an error if serialization or file writing fails.
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
-        let content = serde_json::to_string_pretty(self).map_err(|e| {
-            ConsolidationError::CursorSerialize {
-                source: e,
-            }
-        })?;
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| ConsolidationError::CursorSerialize { source: e })?;
 
-        fs::write(path, content).map_err(|e| {
-            ConsolidationError::CursorSave {
-                path: path.display().to_string(),
-                source: e,
-            }
+        fs::write(path, content).map_err(|e| ConsolidationError::CursorSave {
+            path: path.display().to_string(),
+            source: e,
         })?;
 
         Ok(())
@@ -202,7 +214,11 @@ impl ConsolidationWindow {
     }
 
     /// Applies a consolidation function to the values for a series.
-    pub fn consolidate_series(&self, series_column: u32, consolidation_fn: ConsolidationFn) -> Option<f64> {
+    pub fn consolidate_series(
+        &self,
+        series_column: u32,
+        consolidation_fn: ConsolidationFn,
+    ) -> Option<f64> {
         let values = self.get_values(series_column)?;
         if values.is_empty() {
             return None;
@@ -321,12 +337,13 @@ impl ConsolidationEngine {
         let dest_tier = &schema.tiers[dest_tier_index];
 
         // Get the consolidation function (destination tier must have one)
-        let consolidation_fn = dest_tier.consolidation_fn.ok_or(
-            ConsolidationError::NoConsolidationFunction {
-                schema_index,
-                tier_index: dest_tier_index,
-            }
-        )?;
+        let consolidation_fn =
+            dest_tier
+                .consolidation_fn
+                .ok_or(ConsolidationError::NoConsolidationFunction {
+                    schema_index,
+                    tier_index: dest_tier_index,
+                })?;
 
         // Split rings to get separate mutable and immutable references
         let (left, right) = rings[schema_index].split_at_mut(dest_tier_index);
@@ -351,8 +368,11 @@ impl ConsolidationEngine {
             source_ring.oldest_timestamp().unwrap_or(0)
         } else {
             // Continue from last processed + source tier interval
-            #[allow(clippy::cast_possible_truncation)] // Duration nanos fit in u64 for practical intervals
-            { last_processed + source_tier.interval.as_nanos() as u64 }
+            #[allow(clippy::cast_possible_truncation)]
+            // Duration nanos fit in u64 for practical intervals
+            {
+                last_processed + source_tier.interval.as_nanos() as u64
+            }
         };
 
         // Add 1 to include the newest timestamp (ring.read end is exclusive)
@@ -397,7 +417,10 @@ impl ConsolidationEngine {
         source_tier_index: usize,
         dest_tier_index: usize,
     ) -> Result<u64> {
-        if let Some(timestamp) = self.cursors.get_last_processed(schema_index, source_tier_index, dest_tier_index) {
+        if let Some(timestamp) =
+            self.cursors
+                .get_last_processed(schema_index, source_tier_index, dest_tier_index)
+        {
             return Ok(timestamp);
         }
 
@@ -428,7 +451,8 @@ impl ConsolidationEngine {
         end_timestamp: u64,
         max_series: u32,
     ) -> Result<usize> {
-        #[allow(clippy::cast_possible_truncation)] // Duration nanos fit in u64 for practical intervals
+        #[allow(clippy::cast_possible_truncation)]
+        // Duration nanos fit in u64 for practical intervals
         let dest_interval_ns = dest_tier.interval.as_nanos() as u64;
         let mut operations = 0;
 
@@ -452,9 +476,9 @@ impl ConsolidationEngine {
                 let window_end = window_start + dest_interval_ns;
 
                 // Create or get the window
-                let window = all_windows.entry(window_start).or_insert_with(|| {
-                    ConsolidationWindow::new(window_start, window_end)
-                });
+                let window = all_windows
+                    .entry(window_start)
+                    .or_insert_with(|| ConsolidationWindow::new(window_start, window_end));
 
                 // Add the data point
                 window.add_point(series_column, value);
@@ -464,7 +488,9 @@ impl ConsolidationEngine {
         // Process each window and write consolidated values
         for window in all_windows.values() {
             for series_column in window.series_columns() {
-                if let Some(consolidated_value) = window.consolidate_series(series_column, consolidation_fn) {
+                if let Some(consolidated_value) =
+                    window.consolidate_series(series_column, consolidation_fn)
+                {
                     // Write consolidated value to destination tier
                     dest_ring.write(series_column, consolidated_value, window.start_timestamp)?;
                     operations += 1;
@@ -474,7 +500,6 @@ impl ConsolidationEngine {
 
         Ok(operations)
     }
-
 
     /// Saves consolidation cursors to disk.
     ///
@@ -495,7 +520,13 @@ impl ConsolidationEngine {
     pub fn consolidation_pair_count(&self) -> usize {
         self.schemas
             .iter()
-            .map(|schema| if schema.tiers.len() > 1 { schema.tiers.len() - 1 } else { 0 })
+            .map(|schema| {
+                if schema.tiers.len() > 1 {
+                    schema.tiers.len() - 1
+                } else {
+                    0
+                }
+            })
             .sum()
     }
 }
@@ -549,7 +580,8 @@ mod tests {
                 slot_count,
                 schema.max_series,
                 interval_ns,
-            ).unwrap();
+            )
+            .unwrap();
 
             rings.push(RingBuffer::new(slab));
         }
@@ -611,14 +643,20 @@ mod tests {
         assert!(series_columns.contains(&1));
 
         // Test consolidation
-        let avg = window.consolidate_series(0, ConsolidationFn::Average).unwrap();
+        let avg = window
+            .consolidate_series(0, ConsolidationFn::Average)
+            .unwrap();
         assert_eq!(avg, 15.0); // (10 + 20) / 2
 
         let max_val = window.consolidate_series(1, ConsolidationFn::Max).unwrap();
         assert_eq!(max_val, 30.0);
 
         // Non-existent series should return None
-        assert!(window.consolidate_series(2, ConsolidationFn::Average).is_none());
+        assert!(
+            window
+                .consolidate_series(2, ConsolidationFn::Average)
+                .is_none()
+        );
     }
 
     #[test]
@@ -638,13 +676,11 @@ mod tests {
         let schema = SchemaConfig {
             name: "single_tier".to_string(),
             label_matcher: LabelMatcher::any(),
-            tiers: vec![
-                TierConfig {
-                    interval: Duration::from_secs(1),
-                    retention: Duration::from_secs(60),
-                    consolidation_fn: None,
-                },
-            ],
+            tiers: vec![TierConfig {
+                interval: Duration::from_secs(1),
+                retention: Duration::from_secs(60),
+                consolidation_fn: None,
+            }],
             max_series: 10,
         };
 
@@ -679,17 +715,28 @@ mod tests {
         let base_time = 1_000_000_000_000_000_000u64; // 1 second in nanoseconds
 
         all_rings[0][0].write(0, 10.0, base_time).unwrap();
-        all_rings[0][0].write(0, 20.0, base_time + 1_000_000_000).unwrap();
-        all_rings[0][0].write(0, 30.0, base_time + 2_000_000_000).unwrap();
-        all_rings[0][0].write(0, 40.0, base_time + 10_000_000_000).unwrap(); // Next 10s window
-        all_rings[0][0].write(0, 50.0, base_time + 11_000_000_000).unwrap();
+        all_rings[0][0]
+            .write(0, 20.0, base_time + 1_000_000_000)
+            .unwrap();
+        all_rings[0][0]
+            .write(0, 30.0, base_time + 2_000_000_000)
+            .unwrap();
+        all_rings[0][0]
+            .write(0, 40.0, base_time + 10_000_000_000)
+            .unwrap(); // Next 10s window
+        all_rings[0][0]
+            .write(0, 50.0, base_time + 11_000_000_000)
+            .unwrap();
 
         // Run consolidation
         let operations = engine.consolidate(&mut all_rings).unwrap();
         assert!(operations > 0);
 
         // Check tier 1 (10s intervals) has consolidated data
-        let tier1_data: Vec<_> = all_rings[0][1].read(0, base_time - 1, base_time + 20_000_000_000).unwrap().collect();
+        let tier1_data: Vec<_> = all_rings[0][1]
+            .read(0, base_time - 1, base_time + 20_000_000_000)
+            .unwrap()
+            .collect();
         assert!(!tier1_data.is_empty());
 
         // First window should have average of 10, 20, 30 = 20.0
@@ -708,7 +755,9 @@ mod tests {
         // Write some data
         let base_time = 1_000_000_000_000_000_000u64;
         all_rings[0][0].write(0, 10.0, base_time).unwrap();
-        all_rings[0][0].write(0, 20.0, base_time + 1_000_000_000).unwrap();
+        all_rings[0][0]
+            .write(0, 20.0, base_time + 1_000_000_000)
+            .unwrap();
 
         // First consolidation
         let operations1 = engine.consolidate(&mut all_rings).unwrap();
@@ -732,15 +781,21 @@ mod tests {
 
         // Write initial data
         all_rings[0][0].write(0, 10.0, base_time).unwrap();
-        all_rings[0][0].write(0, 20.0, base_time + 1_000_000_000).unwrap();
+        all_rings[0][0]
+            .write(0, 20.0, base_time + 1_000_000_000)
+            .unwrap();
 
         // First consolidation
         let operations1 = engine.consolidate(&mut all_rings).unwrap();
         assert!(operations1 > 0);
 
         // Add more data
-        all_rings[0][0].write(0, 30.0, base_time + 2_000_000_000).unwrap();
-        all_rings[0][0].write(0, 40.0, base_time + 3_000_000_000).unwrap();
+        all_rings[0][0]
+            .write(0, 30.0, base_time + 2_000_000_000)
+            .unwrap();
+        all_rings[0][0]
+            .write(0, 40.0, base_time + 3_000_000_000)
+            .unwrap();
 
         // Second consolidation should process only new data
         let _operations2 = engine.consolidate(&mut all_rings).unwrap();
@@ -776,17 +831,28 @@ mod tests {
 
         // Write data with different values
         all_rings[0][0].write(0, 100.0, base_time).unwrap();
-        all_rings[0][0].write(0, 50.0, base_time + 1_000_000_000).unwrap();
-        all_rings[0][0].write(0, 75.0, base_time + 2_000_000_000).unwrap();
-        all_rings[0][0].write(0, 25.0, base_time + 3_000_000_000).unwrap();
-        all_rings[0][0].write(0, 90.0, base_time + 4_000_000_000).unwrap();
+        all_rings[0][0]
+            .write(0, 50.0, base_time + 1_000_000_000)
+            .unwrap();
+        all_rings[0][0]
+            .write(0, 75.0, base_time + 2_000_000_000)
+            .unwrap();
+        all_rings[0][0]
+            .write(0, 25.0, base_time + 3_000_000_000)
+            .unwrap();
+        all_rings[0][0]
+            .write(0, 90.0, base_time + 4_000_000_000)
+            .unwrap();
 
         // Consolidate (Min function should give us 25.0)
         let operations = engine.consolidate(&mut all_rings).unwrap();
         assert!(operations > 0);
 
         // Verify the minimum value was written to tier 1
-        let tier1_data: Vec<_> = all_rings[0][1].read(0, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
+        let tier1_data: Vec<_> = all_rings[0][1]
+            .read(0, base_time - 1, base_time + 10_000_000_000)
+            .unwrap()
+            .collect();
 
         // Should have at least one consolidated point
         assert!(!tier1_data.is_empty());
@@ -801,20 +867,24 @@ mod tests {
 
         // First run
         {
-            let mut engine = ConsolidationEngine::new(temp_dir.path(), vec![schema.clone()]).unwrap();
+            let mut engine =
+                ConsolidationEngine::new(temp_dir.path(), vec![schema.clone()]).unwrap();
             let rings = create_test_rings(&temp_dir, &schema);
             let mut all_rings = vec![rings];
 
             // Write and consolidate data
             all_rings[0][0].write(0, 10.0, base_time).unwrap();
-            all_rings[0][0].write(0, 20.0, base_time + 1_000_000_000).unwrap();
+            all_rings[0][0]
+                .write(0, 20.0, base_time + 1_000_000_000)
+                .unwrap();
 
             let _operations = engine.consolidate(&mut all_rings).unwrap();
         }
 
         // Second run (simulating restart)
         {
-            let mut engine = ConsolidationEngine::new(temp_dir.path(), vec![schema.clone()]).unwrap();
+            let mut engine =
+                ConsolidationEngine::new(temp_dir.path(), vec![schema.clone()]).unwrap();
             let rings = create_test_rings(&temp_dir, &schema);
             let mut all_rings = vec![rings];
 
@@ -838,16 +908,26 @@ mod tests {
         // Write data to multiple series
         all_rings[0][0].write(0, 10.0, base_time).unwrap(); // Series 0
         all_rings[0][0].write(1, 100.0, base_time).unwrap(); // Series 1
-        all_rings[0][0].write(0, 20.0, base_time + 1_000_000_000).unwrap();
-        all_rings[0][0].write(1, 200.0, base_time + 1_000_000_000).unwrap();
+        all_rings[0][0]
+            .write(0, 20.0, base_time + 1_000_000_000)
+            .unwrap();
+        all_rings[0][0]
+            .write(1, 200.0, base_time + 1_000_000_000)
+            .unwrap();
 
         // Consolidate
         let operations = engine.consolidate(&mut all_rings).unwrap();
         assert!(operations > 0);
 
         // Both series should have consolidated data
-        let series0_data: Vec<_> = all_rings[0][1].read(0, base_time - 1, base_time + 20_000_000_000).unwrap().collect();
-        let series1_data: Vec<_> = all_rings[0][1].read(1, base_time - 1, base_time + 20_000_000_000).unwrap().collect();
+        let series0_data: Vec<_> = all_rings[0][1]
+            .read(0, base_time - 1, base_time + 20_000_000_000)
+            .unwrap()
+            .collect();
+        let series1_data: Vec<_> = all_rings[0][1]
+            .read(1, base_time - 1, base_time + 20_000_000_000)
+            .unwrap()
+            .collect();
 
         // Each series should have its own consolidated data
         assert!(!series0_data.is_empty() || !series1_data.is_empty());
@@ -866,7 +946,13 @@ mod tests {
 
         // Write enough data to trigger all consolidation levels
         for i in 0u32..65 {
-            all_rings[0][0].write(0, f64::from(i * 10), base_time + u64::from(i) * 1_000_000_000).unwrap();
+            all_rings[0][0]
+                .write(
+                    0,
+                    f64::from(i * 10),
+                    base_time + u64::from(i) * 1_000_000_000,
+                )
+                .unwrap();
         }
 
         // Consolidate multiple times to cascade through tiers
@@ -878,10 +964,16 @@ mod tests {
         }
 
         // Should have data in tier 1 (10s intervals)
-        let tier1_data: Vec<_> = all_rings[0][1].read(0, base_time - 1, base_time + 70_000_000_000).unwrap().collect();
+        let tier1_data: Vec<_> = all_rings[0][1]
+            .read(0, base_time - 1, base_time + 70_000_000_000)
+            .unwrap()
+            .collect();
 
         // Should have data in tier 2 (60s intervals)
-        let _tier2_data: Vec<_> = all_rings[0][2].read(0, base_time - 1, base_time + 70_000_000_000).unwrap().collect();
+        let _tier2_data: Vec<_> = all_rings[0][2]
+            .read(0, base_time - 1, base_time + 70_000_000_000)
+            .unwrap()
+            .collect();
 
         // At least tier 1 should have some data
         assert!(!tier1_data.is_empty());

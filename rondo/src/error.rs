@@ -69,7 +69,9 @@ pub enum StoreError {
     },
 
     /// Schema validation failed when opening an existing store.
-    #[error("schema validation failed: existing schema hash {existing:x} does not match expected {expected:x}")]
+    #[error(
+        "schema validation failed: existing schema hash {existing:x} does not match expected {expected:x}"
+    )]
     SchemaMismatch {
         /// Hash of the schema found in the existing store.
         existing: u64,
@@ -212,7 +214,9 @@ pub enum SchemaError {
     },
 
     /// Tier durations would result in too many slots.
-    #[error("tier {tier} would have {slot_count} slots (max {max_slots}): duration {duration:?} / interval {interval:?}")]
+    #[error(
+        "tier {tier} would have {slot_count} slots (max {max_slots}): duration {duration:?} / interval {interval:?}"
+    )]
     TooManySlots {
         /// The tier index that's problematic.
         tier: usize,

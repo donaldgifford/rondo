@@ -20,7 +20,6 @@
 //! - Wraparound detection enables proper read ordering
 //! - NaN values indicate unwritten or missing data
 
-
 use crate::error::{QueryError, RecordError, Result};
 use crate::slab::Slab;
 
@@ -150,7 +149,10 @@ impl RingBuffer {
         }
 
         if timestamp_ns == 0 {
-            return Err(RecordError::InvalidTimestamp { timestamp: timestamp_ns }.into());
+            return Err(RecordError::InvalidTimestamp {
+                timestamp: timestamp_ns,
+            }
+            .into());
         }
 
         let slot_index = self.compute_slot(timestamp_ns);
@@ -206,7 +208,10 @@ impl RingBuffer {
     pub fn write_batch(&mut self, entries: &[(u32, f64)], timestamp_ns: u64) -> Result<()> {
         // Validate timestamp
         if timestamp_ns == 0 {
-            return Err(RecordError::InvalidTimestamp { timestamp: timestamp_ns }.into());
+            return Err(RecordError::InvalidTimestamp {
+                timestamp: timestamp_ns,
+            }
+            .into());
         }
 
         // Validate all values first
@@ -446,7 +451,10 @@ impl<'a> Iterator for RingIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while self.slots_remaining > 0 {
             let timestamp = self.ring.slab.read_timestamp(self.current_slot);
-            let value = self.ring.slab.read_value(self.current_slot, self.series_column);
+            let value = self
+                .ring
+                .slab
+                .read_value(self.current_slot, self.series_column);
 
             // Move to next slot
             self.current_slot = (self.current_slot + 1) % self.ring.slab.slot_count();
@@ -470,7 +478,8 @@ mod tests {
     fn create_test_ring(slot_count: u32, interval_ns: u64) -> RingBuffer {
         let temp_dir = tempdir().unwrap();
         let slab_path = temp_dir.path().join("test.slab");
-        let slab = Slab::create(slab_path, 0x1234567890abcdef, slot_count, 10, interval_ns).unwrap();
+        let slab =
+            Slab::create(slab_path, 0x1234567890abcdef, slot_count, 10, interval_ns).unwrap();
         RingBuffer::new(slab)
     }
 
@@ -579,11 +588,14 @@ mod tests {
         ring.write(0, 30.0, 5_000_000_000).unwrap();
 
         let data: Vec<_> = ring.read(0, 0, 10_000_000_000).unwrap().collect();
-        assert_eq!(data, vec![
-            (1_000_000_000, 10.0),
-            (3_000_000_000, 20.0),
-            (5_000_000_000, 30.0),
-        ]);
+        assert_eq!(
+            data,
+            vec![
+                (1_000_000_000, 10.0),
+                (3_000_000_000, 20.0),
+                (5_000_000_000, 30.0),
+            ]
+        );
     }
 
     #[test]
@@ -596,11 +608,11 @@ mod tests {
         ring.write(0, 40.0, 7_000_000_000).unwrap();
 
         // Read from 2s to 6s (should get entries at 3s and 5s)
-        let data: Vec<_> = ring.read(0, 2_000_000_000, 6_000_000_000).unwrap().collect();
-        assert_eq!(data, vec![
-            (3_000_000_000, 20.0),
-            (5_000_000_000, 30.0),
-        ]);
+        let data: Vec<_> = ring
+            .read(0, 2_000_000_000, 6_000_000_000)
+            .unwrap()
+            .collect();
+        assert_eq!(data, vec![(3_000_000_000, 20.0), (5_000_000_000, 30.0),]);
     }
 
     #[test]
@@ -615,11 +627,14 @@ mod tests {
 
         // Read all data - should be in chronological order
         let data: Vec<_> = ring.read(0, 0, 10_000_000_000).unwrap().collect();
-        assert_eq!(data, vec![
-            (2_000_000_000, 20.0),
-            (3_000_000_000, 30.0),
-            (4_000_000_000, 40.0),
-        ]);
+        assert_eq!(
+            data,
+            vec![
+                (2_000_000_000, 20.0),
+                (3_000_000_000, 30.0),
+                (4_000_000_000, 40.0),
+            ]
+        );
     }
 
     #[test]
@@ -632,10 +647,7 @@ mod tests {
 
         // Read series 0 - should skip the slot with only series 1 data
         let data: Vec<_> = ring.read(0, 0, 10_000_000_000).unwrap().collect();
-        assert_eq!(data, vec![
-            (1_000_000_000, 10.0),
-            (5_000_000_000, 30.0),
-        ]);
+        assert_eq!(data, vec![(1_000_000_000, 10.0), (5_000_000_000, 30.0),]);
     }
 
     #[test]
@@ -727,10 +739,7 @@ mod tests {
             let ring = RingBuffer::new(slab);
 
             let data: Vec<_> = ring.read(0, 0, 10_000_000_000).unwrap().collect();
-            assert_eq!(data, vec![
-                (1_000_000_000, 10.0),
-                (3_000_000_000, 20.0),
-            ]);
+            assert_eq!(data, vec![(1_000_000_000, 10.0), (3_000_000_000, 20.0),]);
 
             assert_eq!(ring.oldest_timestamp(), Some(1_000_000_000));
             assert_eq!(ring.newest_timestamp(), Some(3_000_000_000));

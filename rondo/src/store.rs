@@ -78,7 +78,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::consolidate::ConsolidationEngine;
 use crate::error::{QueryError, Result, StoreError};
-use crate::query::{analyze_coverage, QueryResult};
+use crate::query::{QueryResult, analyze_coverage};
 use crate::ring::RingBuffer;
 use crate::schema::SchemaConfig;
 use crate::series::{SeriesHandle, SeriesRegistry};
@@ -236,8 +236,8 @@ impl Store {
         };
 
         let metadata_path = path.join(METADATA_FILE);
-        let metadata_json = serde_json::to_string_pretty(&metadata)
-            .map_err(StoreError::MetadataSerialize)?;
+        let metadata_json =
+            serde_json::to_string_pretty(&metadata).map_err(StoreError::MetadataSerialize)?;
 
         fs::write(&metadata_path, metadata_json).map_err(|e| StoreError::DirectoryAccess {
             path: metadata_path.display().to_string(),
@@ -257,7 +257,8 @@ impl Store {
 
                 #[allow(clippy::cast_possible_truncation)] // slot_count validated by TierConfig
                 let slot_count = tier.slot_count() as u32;
-                #[allow(clippy::cast_possible_truncation)] // Duration nanos fit in u64 for practical intervals
+                #[allow(clippy::cast_possible_truncation)]
+                // Duration nanos fit in u64 for practical intervals
                 let interval_ns = tier.interval.as_nanos() as u64;
 
                 let slab = Slab::create(
@@ -293,15 +294,14 @@ impl Store {
     fn open_existing(path: PathBuf, schemas: Vec<SchemaConfig>) -> Result<Self> {
         // Read and validate metadata
         let metadata_path = path.join(METADATA_FILE);
-        let metadata_json = fs::read_to_string(&metadata_path).map_err(|e| {
-            StoreError::DirectoryAccess {
+        let metadata_json =
+            fs::read_to_string(&metadata_path).map_err(|e| StoreError::DirectoryAccess {
                 path: metadata_path.display().to_string(),
                 source: e,
-            }
-        })?;
+            })?;
 
-        let metadata: StoreMetadata = serde_json::from_str(&metadata_json)
-            .map_err(StoreError::MetadataSerialize)?;
+        let metadata: StoreMetadata =
+            serde_json::from_str(&metadata_json).map_err(StoreError::MetadataSerialize)?;
 
         // Validate metadata version
         if metadata.version != METADATA_VERSION {
@@ -417,11 +417,7 @@ impl Store {
     /// ])?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn register(
-        &mut self,
-        name: &str,
-        labels: &[(String, String)],
-    ) -> Result<SeriesHandle> {
+    pub fn register(&mut self, name: &str, labels: &[(String, String)]) -> Result<SeriesHandle> {
         // Register with series registry
         let handle = self.registry.register(name, labels)?;
 
@@ -864,8 +860,13 @@ impl Store {
                 continue;
             }
 
-            let exports =
-                crate::export::drain_tier(&self.rings, schema_index, tier, &schema_handles, cursor)?;
+            let exports = crate::export::drain_tier(
+                &self.rings,
+                schema_index,
+                tier,
+                &schema_handles,
+                cursor,
+            )?;
             all_exports.extend(exports);
         }
 
@@ -876,7 +877,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{LabelMatcher, TierConfig, ConsolidationFn};
+    use crate::schema::{ConsolidationFn, LabelMatcher, TierConfig};
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -962,7 +963,9 @@ mod tests {
         assert_eq!(store2.schemas().len(), 2);
 
         // Verify we can look up the same series
-        let same_handle = store2.registry.get_handle("cpu.usage", &[("type".to_string(), "cpu".to_string())]);
+        let same_handle = store2
+            .registry
+            .get_handle("cpu.usage", &[("type".to_string(), "cpu".to_string())]);
         assert_eq!(same_handle, Some(handle));
     }
 
@@ -976,17 +979,23 @@ mod tests {
 
         // Register series
         let cpu_handle = store
-            .register("cpu.usage", &[
-                ("type".to_string(), "cpu".to_string()),
-                ("host".to_string(), "web1".to_string()),
-            ])
+            .register(
+                "cpu.usage",
+                &[
+                    ("type".to_string(), "cpu".to_string()),
+                    ("host".to_string(), "web1".to_string()),
+                ],
+            )
             .unwrap();
 
         let mem_handle = store
-            .register("memory.usage", &[
-                ("type".to_string(), "memory".to_string()),
-                ("host".to_string(), "web1".to_string()),
-            ])
+            .register(
+                "memory.usage",
+                &[
+                    ("type".to_string(), "memory".to_string()),
+                    ("host".to_string(), "web1".to_string()),
+                ],
+            )
             .unwrap();
 
         // Verify handles are different and in correct schemas
@@ -998,15 +1007,23 @@ mod tests {
         let timestamp = 1_640_000_000_000_000_000u64; // 2021-12-20 16:00:00 UTC in ns
 
         store.record(cpu_handle, 85.5, timestamp).unwrap();
-        store.record(mem_handle, 67.2, timestamp + 1_000_000_000).unwrap();
+        store
+            .record(mem_handle, 67.2, timestamp + 1_000_000_000)
+            .unwrap();
 
         // Verify data was written to the correct ring buffers
         let cpu_ring = &store.rings[0][0]; // CPU schema, tier 0
         let mem_ring = &store.rings[1][0]; // Memory schema, tier 0
 
         // Read back the data
-        let cpu_data: Vec<_> = cpu_ring.read(cpu_handle.column, timestamp - 1, timestamp + 1).unwrap().collect();
-        let mem_data: Vec<_> = mem_ring.read(mem_handle.column, timestamp, timestamp + 2_000_000_000).unwrap().collect();
+        let cpu_data: Vec<_> = cpu_ring
+            .read(cpu_handle.column, timestamp - 1, timestamp + 1)
+            .unwrap()
+            .collect();
+        let mem_data: Vec<_> = mem_ring
+            .read(mem_handle.column, timestamp, timestamp + 2_000_000_000)
+            .unwrap()
+            .collect();
 
         assert_eq!(cpu_data, vec![(timestamp, 85.5)]);
         assert_eq!(mem_data, vec![(timestamp + 1_000_000_000, 67.2)]);
@@ -1030,16 +1047,15 @@ mod tests {
             .unwrap();
 
         let mem_handle = store
-            .register("memory.usage", &[("type".to_string(), "memory".to_string())])
+            .register(
+                "memory.usage",
+                &[("type".to_string(), "memory".to_string())],
+            )
             .unwrap();
 
         // Record batch with mixed schemas
         let timestamp = 1_640_000_000_000_000_000u64;
-        let entries = &[
-            (cpu_handle, 85.5),
-            (cpu2_handle, 14.5),
-            (mem_handle, 67.2),
-        ];
+        let entries = &[(cpu_handle, 85.5), (cpu2_handle, 14.5), (mem_handle, 67.2)];
 
         store.record_batch(entries, timestamp).unwrap();
 
@@ -1047,9 +1063,18 @@ mod tests {
         let cpu_ring = &store.rings[0][0];
         let mem_ring = &store.rings[1][0];
 
-        let cpu_data: Vec<_> = cpu_ring.read(cpu_handle.column, timestamp - 1, timestamp + 1).unwrap().collect();
-        let cpu2_data: Vec<_> = cpu_ring.read(cpu2_handle.column, timestamp - 1, timestamp + 1).unwrap().collect();
-        let mem_data: Vec<_> = mem_ring.read(mem_handle.column, timestamp - 1, timestamp + 1).unwrap().collect();
+        let cpu_data: Vec<_> = cpu_ring
+            .read(cpu_handle.column, timestamp - 1, timestamp + 1)
+            .unwrap()
+            .collect();
+        let cpu2_data: Vec<_> = cpu_ring
+            .read(cpu2_handle.column, timestamp - 1, timestamp + 1)
+            .unwrap()
+            .collect();
+        let mem_data: Vec<_> = mem_ring
+            .read(mem_handle.column, timestamp - 1, timestamp + 1)
+            .unwrap()
+            .collect();
 
         assert_eq!(cpu_data, vec![(timestamp, 85.5)]);
         assert_eq!(cpu2_data, vec![(timestamp, 14.5)]);
@@ -1223,19 +1248,30 @@ mod tests {
         let mut store = Store::open(&store_path, schemas).unwrap();
 
         // Register a series
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Write some data
         let base_time = 1_640_000_000_000_000_000u64;
         store.record(handle, 10.0, base_time).unwrap();
-        store.record(handle, 20.0, base_time + 1_000_000_000).unwrap();
-        store.record(handle, 30.0, base_time + 2_000_000_000).unwrap();
+        store
+            .record(handle, 20.0, base_time + 1_000_000_000)
+            .unwrap();
+        store
+            .record(handle, 30.0, base_time + 2_000_000_000)
+            .unwrap();
 
         // Query tier 0 (high resolution)
-        let result = store.query(handle, 0, base_time, base_time + 3_000_000_000).unwrap();
+        let result = store
+            .query(handle, 0, base_time, base_time + 3_000_000_000)
+            .unwrap();
 
         assert_eq!(result.tier_used(), 0);
-        assert_eq!(result.requested_range(), (base_time, base_time + 3_000_000_000));
+        assert_eq!(
+            result.requested_range(),
+            (base_time, base_time + 3_000_000_000)
+        );
 
         let data: Vec<_> = result.collect_all();
         assert_eq!(data.len(), 3);
@@ -1251,7 +1287,9 @@ mod tests {
         let schemas = create_test_schemas();
         let mut store = Store::open(&store_path, schemas).unwrap();
 
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Try to query tier 99 (doesn't exist)
         let result = store.query(handle, 99, 1000, 2000);
@@ -1273,7 +1311,9 @@ mod tests {
         let schemas = create_test_schemas();
         let mut store = Store::open(&store_path, schemas).unwrap();
 
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Try to query with start >= end
         let result1 = store.query(handle, 0, 2000, 2000);
@@ -1283,8 +1323,14 @@ mod tests {
         assert!(result2.is_err());
 
         // Both should be InvalidTimeRange errors
-        assert!(matches!(result1.unwrap_err(), crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })));
-        assert!(matches!(result2.unwrap_err(), crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })));
+        assert!(matches!(
+            result1.unwrap_err(),
+            crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })
+        ));
+        assert!(matches!(
+            result2.unwrap_err(),
+            crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })
+        ));
     }
 
     #[test]
@@ -1294,7 +1340,9 @@ mod tests {
         let schemas = create_test_schemas();
         let mut store = Store::open(&store_path, schemas).unwrap();
 
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Query without any data
         let result = store.query(handle, 0, 1000, 2000).unwrap();
@@ -1313,19 +1361,29 @@ mod tests {
         let schemas = create_test_schemas();
         let mut store = Store::open(&store_path, schemas).unwrap();
 
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Write data at different times
         let base_time = 1_640_000_000_000_000_000u64;
         store.record(handle, 10.0, base_time).unwrap();
-        store.record(handle, 20.0, base_time + 1_000_000_000).unwrap();
-        store.record(handle, 30.0, base_time + 2_000_000_000).unwrap();
-        store.record(handle, 40.0, base_time + 3_000_000_000).unwrap();
-        store.record(handle, 50.0, base_time + 4_000_000_000).unwrap();
+        store
+            .record(handle, 20.0, base_time + 1_000_000_000)
+            .unwrap();
+        store
+            .record(handle, 30.0, base_time + 2_000_000_000)
+            .unwrap();
+        store
+            .record(handle, 40.0, base_time + 3_000_000_000)
+            .unwrap();
+        store
+            .record(handle, 50.0, base_time + 4_000_000_000)
+            .unwrap();
 
         // Query a subset of the time range
         let start_query = base_time + 1_500_000_000; // Between second and third points
-        let end_query = base_time + 3_500_000_000;   // Between fourth and fifth points
+        let end_query = base_time + 3_500_000_000; // Between fourth and fifth points
 
         let result = store.query(handle, 0, start_query, end_query).unwrap();
         let data: Vec<_> = result.collect_all();
@@ -1342,38 +1400,42 @@ mod tests {
         let store_path = temp_dir.path().join("auto_select_store");
 
         // Create schemas with different retention windows
-        let schemas = vec![
-            SchemaConfig {
-                name: "short_term".to_string(),
-                label_matcher: LabelMatcher::new([("type", "cpu")]),
-                tiers: vec![
-                    TierConfig {
-                        interval: Duration::from_secs(1),
-                        retention: Duration::from_secs(60),  // 1 minute retention
-                        consolidation_fn: None,
-                    },
-                    TierConfig {
-                        interval: Duration::from_secs(60),
-                        retention: Duration::from_secs(3600), // 1 hour retention
-                        consolidation_fn: Some(ConsolidationFn::Average),
-                    },
-                ],
-                max_series: 1000,
-            }
-        ];
+        let schemas = vec![SchemaConfig {
+            name: "short_term".to_string(),
+            label_matcher: LabelMatcher::new([("type", "cpu")]),
+            tiers: vec![
+                TierConfig {
+                    interval: Duration::from_secs(1),
+                    retention: Duration::from_secs(60), // 1 minute retention
+                    consolidation_fn: None,
+                },
+                TierConfig {
+                    interval: Duration::from_secs(60),
+                    retention: Duration::from_secs(3600), // 1 hour retention
+                    consolidation_fn: Some(ConsolidationFn::Average),
+                },
+            ],
+            max_series: 1000,
+        }];
 
         let mut store = Store::open(&store_path, schemas).unwrap();
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Write data across time ranges
         let base_time = 1_640_000_000_000_000_000u64;
 
         // Recent data (tier 0 should handle this)
         store.record(handle, 10.0, base_time).unwrap();
-        store.record(handle, 20.0, base_time + 30_000_000_000).unwrap();
+        store
+            .record(handle, 20.0, base_time + 30_000_000_000)
+            .unwrap();
 
         // Query recent data - should use tier 0
-        let result = store.query_auto(handle, base_time, base_time + 45_000_000_000).unwrap();
+        let result = store
+            .query_auto(handle, base_time, base_time + 45_000_000_000)
+            .unwrap();
         assert_eq!(result.tier_used(), 0);
 
         let data: Vec<_> = result.collect_all();
@@ -1387,7 +1449,9 @@ mod tests {
         let schemas = create_test_schemas();
         let mut store = Store::open(&store_path, schemas).unwrap();
 
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Query auto on empty store
         let result = store.query_auto(handle, 1000, 2000).unwrap();
@@ -1406,12 +1470,17 @@ mod tests {
         let schemas = create_test_schemas();
         let mut store = Store::open(&store_path, schemas).unwrap();
 
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Try query_auto with invalid range
         let result = store.query_auto(handle, 2000, 1000);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })));
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::error::RondoError::Query(QueryError::InvalidTimeRange { .. })
+        ));
     }
 
     #[test]
@@ -1421,12 +1490,16 @@ mod tests {
         let schemas = create_test_schemas();
         let mut store = Store::open(&store_path, schemas).unwrap();
 
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Write some data
         let base_time = 1_640_000_000_000_000_000u64;
         store.record(handle, 42.0, base_time).unwrap();
-        store.record(handle, 84.0, base_time + 1_000_000_000).unwrap();
+        store
+            .record(handle, 84.0, base_time + 1_000_000_000)
+            .unwrap();
 
         let query_start = base_time - 500_000_000; // Start before first data point
         let query_end = base_time + 2_000_000_000;
@@ -1453,15 +1526,25 @@ mod tests {
         let schemas = create_test_schemas();
         let mut store = Store::open(&store_path, schemas).unwrap();
 
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Write multiple data points
         let base_time = 1_640_000_000_000_000_000u64;
         for i in 0u32..5 {
-            store.record(handle, f64::from(i * 10), base_time + u64::from(i) * 1_000_000_000).unwrap();
+            store
+                .record(
+                    handle,
+                    f64::from(i * 10),
+                    base_time + u64::from(i) * 1_000_000_000,
+                )
+                .unwrap();
         }
 
-        let result = store.query(handle, 0, base_time, base_time + 5_000_000_000).unwrap();
+        let result = store
+            .query(handle, 0, base_time, base_time + 5_000_000_000)
+            .unwrap();
 
         // Test count method (this consumes the iterator)
         assert_eq!(result.count(), 5);
@@ -1475,8 +1558,12 @@ mod tests {
         let mut store = Store::open(&store_path, schemas).unwrap();
 
         // Register series in different schemas
-        let cpu_handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
-        let mem_handle = store.register("mem.usage", &[("type".to_string(), "memory".to_string())]).unwrap();
+        let cpu_handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
+        let mem_handle = store
+            .register("mem.usage", &[("type".to_string(), "memory".to_string())])
+            .unwrap();
 
         // Write data to both
         let base_time = 1_640_000_000_000_000_000u64;
@@ -1484,8 +1571,12 @@ mod tests {
         store.record(mem_handle, 60.0, base_time).unwrap();
 
         // Query both schemas
-        let cpu_result = store.query(cpu_handle, 0, base_time, base_time + 1_000_000_000).unwrap();
-        let mem_result = store.query(mem_handle, 0, base_time, base_time + 1_000_000_000).unwrap();
+        let cpu_result = store
+            .query(cpu_handle, 0, base_time, base_time + 1_000_000_000)
+            .unwrap();
+        let mem_result = store
+            .query(mem_handle, 0, base_time, base_time + 1_000_000_000)
+            .unwrap();
 
         // Verify they're in different schemas but queries work correctly
         assert_eq!(cpu_handle.schema_index, 0);
@@ -1504,28 +1595,28 @@ mod tests {
         let store_path = temp_dir.path().join("consolidation_store");
 
         // Create schema with multiple tiers
-        let schemas = vec![
-            SchemaConfig {
-                name: "multi_tier".to_string(),
-                label_matcher: LabelMatcher::new([("type", "cpu")]),
-                tiers: vec![
-                    TierConfig {
-                        interval: Duration::from_secs(1),
-                        retention: Duration::from_secs(60),
-                        consolidation_fn: None,
-                    },
-                    TierConfig {
-                        interval: Duration::from_secs(10),
-                        retention: Duration::from_secs(600),
-                        consolidation_fn: Some(ConsolidationFn::Average),
-                    },
-                ],
-                max_series: 100,
-            }
-        ];
+        let schemas = vec![SchemaConfig {
+            name: "multi_tier".to_string(),
+            label_matcher: LabelMatcher::new([("type", "cpu")]),
+            tiers: vec![
+                TierConfig {
+                    interval: Duration::from_secs(1),
+                    retention: Duration::from_secs(60),
+                    consolidation_fn: None,
+                },
+                TierConfig {
+                    interval: Duration::from_secs(10),
+                    retention: Duration::from_secs(600),
+                    consolidation_fn: Some(ConsolidationFn::Average),
+                },
+            ],
+            max_series: 100,
+        }];
 
         let mut store = Store::open(&store_path, schemas).unwrap();
-        let handle = store.register("cpu.usage", &[("type".to_string(), "cpu".to_string())]).unwrap();
+        let handle = store
+            .register("cpu.usage", &[("type".to_string(), "cpu".to_string())])
+            .unwrap();
 
         // Write some data to tier 0
         let base_time = 1_000_000_000_000_000_000u64; // 1s intervals in ns
@@ -1537,11 +1628,20 @@ mod tests {
 
         // Run consolidation
         let operations = store.consolidate().unwrap();
-        assert!(operations > 0, "Should have performed consolidation operations");
+        assert!(
+            operations > 0,
+            "Should have performed consolidation operations"
+        );
 
         // Verify consolidated data exists in tier 1
-        let tier1_data: Vec<_> = store.query(handle, 1, base_time - 1, base_time + 20_000_000_000).unwrap().collect();
-        assert!(!tier1_data.is_empty(), "Tier 1 should have consolidated data");
+        let tier1_data: Vec<_> = store
+            .query(handle, 1, base_time - 1, base_time + 20_000_000_000)
+            .unwrap()
+            .collect();
+        assert!(
+            !tier1_data.is_empty(),
+            "Tier 1 should have consolidated data"
+        );
 
         // Second consolidation run should be idempotent (no new data)
         let operations2 = store.consolidate().unwrap();
@@ -1554,25 +1654,23 @@ mod tests {
         let store_path = temp_dir.path().join("single_tier_store");
 
         // Create schema with only one tier
-        let schemas = vec![
-            SchemaConfig {
-                name: "single_tier".to_string(),
-                label_matcher: LabelMatcher::any(),
-                tiers: vec![
-                    TierConfig {
-                        interval: Duration::from_secs(1),
-                        retention: Duration::from_secs(60),
-                        consolidation_fn: None,
-                    },
-                ],
-                max_series: 100,
-            }
-        ];
+        let schemas = vec![SchemaConfig {
+            name: "single_tier".to_string(),
+            label_matcher: LabelMatcher::any(),
+            tiers: vec![TierConfig {
+                interval: Duration::from_secs(1),
+                retention: Duration::from_secs(60),
+                consolidation_fn: None,
+            }],
+            max_series: 100,
+        }];
 
         let mut store = Store::open(&store_path, schemas).unwrap();
         let handle = store.register("metric", &[]).unwrap();
 
-        store.record(handle, 42.0, 1_000_000_000_000_000_000).unwrap();
+        store
+            .record(handle, 42.0, 1_000_000_000_000_000_000)
+            .unwrap();
 
         // Consolidation should be a no-op (no multi-tier schemas)
         let operations = store.consolidate().unwrap();
@@ -1585,30 +1683,28 @@ mod tests {
         let store_path = temp_dir.path().join("consolidation_functions_store");
 
         // Create schema with different consolidation functions
-        let schemas = vec![
-            SchemaConfig {
-                name: "test_functions".to_string(),
-                label_matcher: LabelMatcher::any(),
-                tiers: vec![
-                    TierConfig {
-                        interval: Duration::from_secs(1),
-                        retention: Duration::from_secs(60),
-                        consolidation_fn: None,
-                    },
-                    TierConfig {
-                        interval: Duration::from_secs(5),
-                        retention: Duration::from_secs(300),
-                        consolidation_fn: Some(ConsolidationFn::Min),
-                    },
-                    TierConfig {
-                        interval: Duration::from_secs(15),
-                        retention: Duration::from_secs(900),
-                        consolidation_fn: Some(ConsolidationFn::Max),
-                    },
-                ],
-                max_series: 50,
-            }
-        ];
+        let schemas = vec![SchemaConfig {
+            name: "test_functions".to_string(),
+            label_matcher: LabelMatcher::any(),
+            tiers: vec![
+                TierConfig {
+                    interval: Duration::from_secs(1),
+                    retention: Duration::from_secs(60),
+                    consolidation_fn: None,
+                },
+                TierConfig {
+                    interval: Duration::from_secs(5),
+                    retention: Duration::from_secs(300),
+                    consolidation_fn: Some(ConsolidationFn::Min),
+                },
+                TierConfig {
+                    interval: Duration::from_secs(15),
+                    retention: Duration::from_secs(900),
+                    consolidation_fn: Some(ConsolidationFn::Max),
+                },
+            ],
+            max_series: 50,
+        }];
 
         let mut store = Store::open(&store_path, schemas).unwrap();
         let handle = store.register("test_metric", &[]).unwrap();
@@ -1631,10 +1727,16 @@ mod tests {
         }
 
         // Check that data exists in tier 1 (Min consolidation)
-        let tier1_data: Vec<_> = store.query(handle, 1, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
+        let tier1_data: Vec<_> = store
+            .query(handle, 1, base_time - 1, base_time + 10_000_000_000)
+            .unwrap()
+            .collect();
 
         // Check that data exists in tier 2 (Max consolidation)
-        let tier2_data: Vec<_> = store.query(handle, 2, base_time - 1, base_time + 20_000_000_000).unwrap().collect();
+        let tier2_data: Vec<_> = store
+            .query(handle, 2, base_time - 1, base_time + 20_000_000_000)
+            .unwrap()
+            .collect();
 
         // At least tier 1 should have data
         assert!(!tier1_data.is_empty() || !tier2_data.is_empty());
@@ -1645,25 +1747,23 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let store_path = temp_dir.path().join("cursor_persistence_store");
 
-        let schemas = vec![
-            SchemaConfig {
-                name: "persistence_test".to_string(),
-                label_matcher: LabelMatcher::any(),
-                tiers: vec![
-                    TierConfig {
-                        interval: Duration::from_secs(1),
-                        retention: Duration::from_secs(60),
-                        consolidation_fn: None,
-                    },
-                    TierConfig {
-                        interval: Duration::from_secs(5),
-                        retention: Duration::from_secs(300),
-                        consolidation_fn: Some(ConsolidationFn::Average),
-                    },
-                ],
-                max_series: 50,
-            }
-        ];
+        let schemas = vec![SchemaConfig {
+            name: "persistence_test".to_string(),
+            label_matcher: LabelMatcher::any(),
+            tiers: vec![
+                TierConfig {
+                    interval: Duration::from_secs(1),
+                    retention: Duration::from_secs(60),
+                    consolidation_fn: None,
+                },
+                TierConfig {
+                    interval: Duration::from_secs(5),
+                    retention: Duration::from_secs(300),
+                    consolidation_fn: Some(ConsolidationFn::Average),
+                },
+            ],
+            max_series: 50,
+        }];
 
         let base_time = 1_000_000_000_000_000_000u64;
 
@@ -1700,7 +1800,10 @@ mod tests {
 
             // Verify that consolidation cursors file exists
             let cursor_file = store_path.join("consolidation_cursors.json");
-            assert!(cursor_file.exists(), "Consolidation cursors should be persisted");
+            assert!(
+                cursor_file.exists(),
+                "Consolidation cursors should be persisted"
+            );
         }
     }
 
@@ -1709,25 +1812,23 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let store_path = temp_dir.path().join("multi_series_consolidation_store");
 
-        let schemas = vec![
-            SchemaConfig {
-                name: "multi_series_test".to_string(),
-                label_matcher: LabelMatcher::any(),
-                tiers: vec![
-                    TierConfig {
-                        interval: Duration::from_secs(1),
-                        retention: Duration::from_secs(60),
-                        consolidation_fn: None,
-                    },
-                    TierConfig {
-                        interval: Duration::from_secs(5),
-                        retention: Duration::from_secs(300),
-                        consolidation_fn: Some(ConsolidationFn::Sum),
-                    },
-                ],
-                max_series: 10,
-            }
-        ];
+        let schemas = vec![SchemaConfig {
+            name: "multi_series_test".to_string(),
+            label_matcher: LabelMatcher::any(),
+            tiers: vec![
+                TierConfig {
+                    interval: Duration::from_secs(1),
+                    retention: Duration::from_secs(60),
+                    consolidation_fn: None,
+                },
+                TierConfig {
+                    interval: Duration::from_secs(5),
+                    retention: Duration::from_secs(300),
+                    consolidation_fn: Some(ConsolidationFn::Sum),
+                },
+            ],
+            max_series: 10,
+        }];
 
         let mut store = Store::open(&store_path, schemas).unwrap();
 
@@ -1751,12 +1852,23 @@ mod tests {
         assert!(operations > 0);
 
         // Verify all series have consolidated data
-        let series1_tier1: Vec<_> = store.query(handle1, 1, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
-        let series2_tier1: Vec<_> = store.query(handle2, 1, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
-        let series3_tier1: Vec<_> = store.query(handle3, 1, base_time - 1, base_time + 10_000_000_000).unwrap().collect();
+        let series1_tier1: Vec<_> = store
+            .query(handle1, 1, base_time - 1, base_time + 10_000_000_000)
+            .unwrap()
+            .collect();
+        let series2_tier1: Vec<_> = store
+            .query(handle2, 1, base_time - 1, base_time + 10_000_000_000)
+            .unwrap()
+            .collect();
+        let series3_tier1: Vec<_> = store
+            .query(handle3, 1, base_time - 1, base_time + 10_000_000_000)
+            .unwrap()
+            .collect();
 
         // At least one series should have consolidated data
-        assert!(!series1_tier1.is_empty() || !series2_tier1.is_empty() || !series3_tier1.is_empty());
+        assert!(
+            !series1_tier1.is_empty() || !series2_tier1.is_empty() || !series3_tier1.is_empty()
+        );
     }
 
     #[test]
@@ -1764,25 +1876,23 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let store_path = temp_dir.path().join("empty_consolidation_store");
 
-        let schemas = vec![
-            SchemaConfig {
-                name: "empty_test".to_string(),
-                label_matcher: LabelMatcher::any(),
-                tiers: vec![
-                    TierConfig {
-                        interval: Duration::from_secs(1),
-                        retention: Duration::from_secs(60),
-                        consolidation_fn: None,
-                    },
-                    TierConfig {
-                        interval: Duration::from_secs(5),
-                        retention: Duration::from_secs(300),
-                        consolidation_fn: Some(ConsolidationFn::Average),
-                    },
-                ],
-                max_series: 10,
-            }
-        ];
+        let schemas = vec![SchemaConfig {
+            name: "empty_test".to_string(),
+            label_matcher: LabelMatcher::any(),
+            tiers: vec![
+                TierConfig {
+                    interval: Duration::from_secs(1),
+                    retention: Duration::from_secs(60),
+                    consolidation_fn: None,
+                },
+                TierConfig {
+                    interval: Duration::from_secs(5),
+                    retention: Duration::from_secs(300),
+                    consolidation_fn: Some(ConsolidationFn::Average),
+                },
+            ],
+            max_series: 10,
+        }];
 
         let mut store = Store::open(&store_path, schemas).unwrap();
 

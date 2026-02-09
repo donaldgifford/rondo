@@ -150,9 +150,10 @@ impl SchemaConfig {
 
         // Check that highest resolution tier has no consolidation function
         if let Some(first_tier) = self.tiers.first()
-            && first_tier.consolidation_fn.is_some() {
-                return Err(SchemaError::ConsolidationOnHighestTier.into());
-            }
+            && first_tier.consolidation_fn.is_some()
+        {
+            return Err(SchemaError::ConsolidationOnHighestTier.into());
+        }
 
         Ok(())
     }
@@ -660,23 +661,14 @@ mod tests {
         assert!(config.is_ok());
 
         // Invalid: no tiers
-        let config = SchemaConfig::new(
-            "test".to_string(),
-            LabelMatcher::any(),
-            vec![],
-            1000,
-        );
+        let config = SchemaConfig::new("test".to_string(), LabelMatcher::any(), vec![], 1000);
         assert!(config.is_err());
 
         // Invalid: consolidation on highest res tier
         let mut invalid_tiers = valid_tiers.clone();
         invalid_tiers[0].consolidation_fn = Some(ConsolidationFn::Average);
-        let config = SchemaConfig::new(
-            "test".to_string(),
-            LabelMatcher::any(),
-            invalid_tiers,
-            1000,
-        );
+        let config =
+            SchemaConfig::new("test".to_string(), LabelMatcher::any(), invalid_tiers, 1000);
         assert!(config.is_err());
 
         // Invalid: tiers not ordered

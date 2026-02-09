@@ -411,7 +411,8 @@ impl Slab {
     ) {
         // Initialize timestamp column with zeros
         // SAFETY: timestamp_column_offset is computed from validated layout parameters.
-        let timestamp_ptr = unsafe { mmap.as_mut_ptr().add(layout.timestamp_column_offset) as *mut u64 };
+        let timestamp_ptr =
+            unsafe { mmap.as_mut_ptr().add(layout.timestamp_column_offset) as *mut u64 };
         for i in 0..slot_count {
             // SAFETY: We're writing within the pre-allocated timestamp column region.
             // The index i is bounded by slot_count.
@@ -560,9 +561,7 @@ impl Slab {
         let ptr = unsafe { self.mmap.as_ptr().add(offset) as *const u64 };
         // SAFETY: The pointer is valid and points to a properly aligned u64
         // within the memory-mapped region.
-        unsafe {
-            ptr::read(ptr)
-        }
+        unsafe { ptr::read(ptr) }
     }
 
     /// Writes a value to the specified slot and series column.
@@ -612,9 +611,7 @@ impl Slab {
         let ptr = unsafe { self.mmap.as_ptr().add(offset) as *const f64 };
         // SAFETY: The pointer is valid and points to a properly aligned f64
         // within the memory-mapped region.
-        unsafe {
-            ptr::read(ptr)
-        }
+        unsafe { ptr::read(ptr) }
     }
 
     /// Gets the column offset for a series from the series directory.
@@ -733,8 +730,8 @@ mod tests {
         let slab = Slab::create(
             &slab_path,
             0x1234567890abcdef,
-            100, // 100 slots
-            5,   // 5 series max
+            100,           // 100 slots
+            5,             // 5 series max
             1_000_000_000, // 1 second interval
         )
         .unwrap();
@@ -764,8 +761,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let slab_path = temp_dir.path().join("test.slab");
 
-        let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 100, 5, 1_000_000_000)
-            .unwrap();
+        let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 100, 5, 1_000_000_000).unwrap();
 
         // Update cursor and series count
         slab.set_write_cursor(42);
@@ -787,8 +783,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let slab_path = temp_dir.path().join("test.slab");
 
-        let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 100, 5, 1_000_000_000)
-            .unwrap();
+        let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 100, 5, 1_000_000_000).unwrap();
 
         // Initially timestamps should be zero
         assert_eq!(slab.read_timestamp(0), 0);
@@ -816,8 +811,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let slab_path = temp_dir.path().join("test.slab");
 
-        let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 100, 5, 1_000_000_000)
-            .unwrap();
+        let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 100, 5, 1_000_000_000).unwrap();
 
         // Initially values should be NaN
         assert!(slab.read_value(0, 0).is_nan());
@@ -845,17 +839,16 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let slab_path = temp_dir.path().join("test.slab");
 
-        let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 100, 5, 1_000_000_000)
-            .unwrap();
+        let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 100, 5, 1_000_000_000).unwrap();
 
         // Initially no series registered
         assert_eq!(slab.get_series_column(0), None);
         assert_eq!(slab.get_series_column(4), None);
 
         // Register some series
-        slab.set_series_column(0, 0);  // series 0 -> column 0
-        slab.set_series_column(2, 1);  // series 2 -> column 1
-        slab.set_series_column(4, 3);  // series 4 -> column 3
+        slab.set_series_column(0, 0); // series 0 -> column 0
+        slab.set_series_column(2, 1); // series 2 -> column 1
+        slab.set_series_column(4, 3); // series 4 -> column 3
 
         // Verify lookups
         assert_eq!(slab.get_series_column(0), Some(0));
@@ -879,10 +872,12 @@ mod tests {
 
         let result = Slab::open(&slab_path);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("invalid magic bytes"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("invalid magic bytes")
+        );
     }
 
     #[test]
@@ -905,8 +900,8 @@ mod tests {
 
         // Create slab and write some data
         {
-            let mut slab = Slab::create(&slab_path, 0x1234567890abcdef, 10, 3, 1_000_000_000)
-                .unwrap();
+            let mut slab =
+                Slab::create(&slab_path, 0x1234567890abcdef, 10, 3, 1_000_000_000).unwrap();
 
             slab.set_write_cursor(5);
             slab.set_series_count(2);
@@ -943,4 +938,3 @@ mod tests {
         }
     }
 }
-

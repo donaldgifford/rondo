@@ -6,8 +6,8 @@
 
 use std::time::Duration;
 
-use rondo::schema::{ConsolidationFn, LabelMatcher, SchemaConfig, TierConfig};
 use rondo::Store;
+use rondo::schema::{ConsolidationFn, LabelMatcher, SchemaConfig, TierConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a temporary directory for the store
@@ -47,16 +47,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Created store with 3 tiers: 1s->10s(avg)->60s(max)");
 
     // Register a CPU usage series
-    let cpu_handle = store.register("cpu.usage", &[
-        ("host".to_string(), "server1".to_string()),
-        ("metric".to_string(), "cpu".to_string()),
-    ])?;
+    let cpu_handle = store.register(
+        "cpu.usage",
+        &[
+            ("host".to_string(), "server1".to_string()),
+            ("metric".to_string(), "cpu".to_string()),
+        ],
+    )?;
 
     // Register a memory usage series
-    let mem_handle = store.register("memory.usage", &[
-        ("host".to_string(), "server1".to_string()),
-        ("metric".to_string(), "memory".to_string()),
-    ])?;
+    let mem_handle = store.register(
+        "memory.usage",
+        &[
+            ("host".to_string(), "server1".to_string()),
+            ("metric".to_string(), "memory".to_string()),
+        ],
+    )?;
 
     println!("Registered CPU and memory usage series");
 
@@ -82,7 +88,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store.record(mem_handle, mem_value, timestamp)?;
 
         if i % 10 == 0 {
-            println!("  t+{}s: CPU={:.1}%, Memory={:.1}%", i, cpu_value, mem_value);
+            println!(
+                "  t+{}s: CPU={:.1}%, Memory={:.1}%",
+                i, cpu_value, mem_value
+            );
         }
     }
 
@@ -97,7 +106,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  Round {}: No new consolidation needed", round);
             break;
         }
-        println!("  Round {}: Performed {} consolidation operations", round, operations);
+        println!(
+            "  Round {}: Performed {} consolidation operations",
+            round, operations
+        );
     }
 
     println!("\nTotal consolidation operations: {}", total_operations);
@@ -117,8 +129,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tier1_data: Vec<_> = tier1_result.collect();
     println!("  Tier 1 (10s avg): {} data points", tier1_data.len());
     if !tier1_data.is_empty() {
-        println!("    Sample: t={}, value={:.1}%",
-                 tier1_data[0].0 - base_time, tier1_data[0].1);
+        println!(
+            "    Sample: t={}, value={:.1}%",
+            tier1_data[0].0 - base_time,
+            tier1_data[0].1
+        );
     }
 
     // Tier 2 (60s resolution, max values)
@@ -126,8 +141,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tier2_data: Vec<_> = tier2_result.collect();
     println!("  Tier 2 (60s max): {} data points", tier2_data.len());
     if !tier2_data.is_empty() {
-        println!("    Sample: t={}, value={:.1}%",
-                 tier2_data[0].0 - base_time, tier2_data[0].1);
+        println!(
+            "    Sample: t={}, value={:.1}%",
+            tier2_data[0].0 - base_time,
+            tier2_data[0].1
+        );
     }
 
     println!("\nQuerying memory usage from different tiers:");
@@ -143,7 +161,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Tier 2 (60s max): {} data points", mem_tier2_data.len());
 
     println!("\nConsolidation complete! Data is now available at multiple resolutions.");
-    println!("Cursor state is persisted in: {}/consolidation_cursors.json", store_path);
+    println!(
+        "Cursor state is persisted in: {}/consolidation_cursors.json",
+        store_path
+    );
 
     // Clean up (optional)
     if std::path::Path::new(store_path).exists() {

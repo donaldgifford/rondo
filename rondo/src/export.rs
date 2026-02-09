@@ -124,10 +124,8 @@ impl ExportCursor {
         if self.path.as_os_str().is_empty() {
             return Ok(());
         }
-        let data =
-            serde_json::to_string_pretty(self).map_err(|e| ExportError::CursorSerialize {
-                source: e,
-            })?;
+        let data = serde_json::to_string_pretty(self)
+            .map_err(|e| ExportError::CursorSerialize { source: e })?;
         std::fs::write(&self.path, data).map_err(|e| ExportError::CursorSave {
             path: self.path.clone(),
             source: e,
@@ -142,7 +140,13 @@ impl ExportCursor {
     }
 
     /// Updates the last exported timestamp for a (schema, tier, column) triple.
-    fn update(&mut self, schema_index: usize, tier_index: usize, series_column: u32, timestamp: u64) {
+    fn update(
+        &mut self,
+        schema_index: usize,
+        tier_index: usize,
+        series_column: u32,
+        timestamp: u64,
+    ) {
         let key = Self::make_key(schema_index, tier_index, series_column);
         self.cursors.insert(key, timestamp);
     }
@@ -239,9 +243,14 @@ mod tests {
     use crate::slab::Slab;
     use tempfile::tempdir;
 
-    fn create_test_ring(temp_dir: &std::path::Path, slot_count: u32, interval_ns: u64) -> RingBuffer {
+    fn create_test_ring(
+        temp_dir: &std::path::Path,
+        slot_count: u32,
+        interval_ns: u64,
+    ) -> RingBuffer {
         let slab_path = temp_dir.join("test.slab");
-        let slab = Slab::create(slab_path, 0x1234567890abcdef, slot_count, 10, interval_ns).unwrap();
+        let slab =
+            Slab::create(slab_path, 0x1234567890abcdef, slot_count, 10, interval_ns).unwrap();
         RingBuffer::new(slab)
     }
 
@@ -308,7 +317,12 @@ mod tests {
 
         // Write 5 data points
         for i in 0u32..5 {
-            ring.write(0, f64::from(i * 10), base_time + u64::from(i) * 1_000_000_000).unwrap();
+            ring.write(
+                0,
+                f64::from(i * 10),
+                base_time + u64::from(i) * 1_000_000_000,
+            )
+            .unwrap();
         }
 
         let points = drain_series(&ring, 0, 0, 0, &mut cursor).unwrap();
@@ -330,7 +344,12 @@ mod tests {
 
         // Write first batch
         for i in 0u32..5 {
-            ring.write(0, f64::from(i * 10), base_time + u64::from(i) * 1_000_000_000).unwrap();
+            ring.write(
+                0,
+                f64::from(i * 10),
+                base_time + u64::from(i) * 1_000_000_000,
+            )
+            .unwrap();
         }
 
         let points1 = drain_series(&ring, 0, 0, 0, &mut cursor).unwrap();
@@ -338,7 +357,12 @@ mod tests {
 
         // Write second batch
         for i in 5u32..10 {
-            ring.write(0, f64::from(i * 10), base_time + u64::from(i) * 1_000_000_000).unwrap();
+            ring.write(
+                0,
+                f64::from(i * 10),
+                base_time + u64::from(i) * 1_000_000_000,
+            )
+            .unwrap();
         }
 
         // Second drain should only return new data
@@ -357,7 +381,12 @@ mod tests {
         let base_time = 1_000_000_000_000_000_000u64;
 
         for i in 0u32..5 {
-            ring.write(0, f64::from(i * 10), base_time + u64::from(i) * 1_000_000_000).unwrap();
+            ring.write(
+                0,
+                f64::from(i * 10),
+                base_time + u64::from(i) * 1_000_000_000,
+            )
+            .unwrap();
         }
 
         // First drain

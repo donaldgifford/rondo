@@ -84,7 +84,10 @@ fn simulate_embedded_recording(vm_lifetime_secs: u32) -> u32 {
 
     let mut store = Store::open(&temp_dir, schemas).unwrap();
     let handle = store
-        .register("cpu_usage", &[("vm".to_string(), "ephemeral-1".to_string())])
+        .register(
+            "cpu_usage",
+            &[("vm".to_string(), "ephemeral-1".to_string())],
+        )
         .unwrap();
 
     let base_time = 1_700_000_000_000_000_000u64;

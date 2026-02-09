@@ -321,12 +321,7 @@ impl VirtioBlock {
     ///
     /// Returns a [`WriteResult`] indicating whether an IRQ should be
     /// injected and any completed I/O operations for metrics recording.
-    pub fn mmio_write(
-        &mut self,
-        offset: u64,
-        data: &[u8],
-        mem: &GuestMemoryMmap,
-    ) -> WriteResult {
+    pub fn mmio_write(&mut self, offset: u64, data: &[u8], mem: &GuestMemoryMmap) -> WriteResult {
         let no_op = WriteResult {
             needs_interrupt: false,
             completed: Vec::new(),
@@ -345,8 +340,7 @@ impl VirtioBlock {
                 if self.driver_features_sel == 0 {
                     self.driver_features = (self.driver_features & mask) | u64::from(val);
                 } else if self.driver_features_sel == 1 {
-                    self.driver_features =
-                        (self.driver_features & !mask) | (u64::from(val) << 32);
+                    self.driver_features = (self.driver_features & !mask) | (u64::from(val) << 32);
                 }
             }
             REG_DRIVER_FEATURES_SEL => self.driver_features_sel = val,
@@ -482,8 +476,7 @@ impl VirtioBlock {
         while self.queue.last_avail_idx != avail_idx {
             // Read the descriptor chain head from avail ring.
             // avail ring layout: flags(u16) | idx(u16) | ring[N](u16 each)
-            let ring_entry_offset =
-                4 + u64::from(self.queue.last_avail_idx % self.queue.num) * 2;
+            let ring_entry_offset = 4 + u64::from(self.queue.last_avail_idx % self.queue.num) * 2;
             let desc_head: u16 =
                 match mem.read_obj(GuestAddress(self.queue.avail_ring + ring_entry_offset)) {
                     Ok(v) => v,
@@ -536,11 +529,7 @@ impl VirtioBlock {
     /// Returns `(used_len, Option<CompletedIo>)` where `used_len` is the
     /// total bytes written into device-writable descriptors (for the used
     /// ring entry).
-    fn process_request(
-        &mut self,
-        head: u16,
-        mem: &GuestMemoryMmap,
-    ) -> (u32, Option<CompletedIo>) {
+    fn process_request(&mut self, head: u16, mem: &GuestMemoryMmap) -> (u32, Option<CompletedIo>) {
         let start = Instant::now();
 
         // 1. Read the header descriptor.
@@ -673,7 +662,10 @@ impl VirtioBlock {
             match self.backing.read_exact(&mut buf) {
                 Ok(()) => {
                     if let Err(e) = mem.write(&buf, GuestAddress(desc.addr)) {
-                        tracing::warn!("virtio-blk read: guest write at {:#x} failed: {e}", desc.addr);
+                        tracing::warn!(
+                            "virtio-blk read: guest write at {:#x} failed: {e}",
+                            desc.addr
+                        );
                         return (VIRTIO_BLK_S_IOERR, total_bytes, IoOp::Read);
                     }
                     offset += len as u64;
@@ -709,7 +701,10 @@ impl VirtioBlock {
             let mut buf = vec![0u8; len];
 
             if let Err(e) = mem.read(&mut buf, GuestAddress(desc.addr)) {
-                tracing::warn!("virtio-blk write: guest read at {:#x} failed: {e}", desc.addr);
+                tracing::warn!(
+                    "virtio-blk write: guest read at {:#x} failed: {e}",
+                    desc.addr
+                );
                 return (VIRTIO_BLK_S_IOERR, total_bytes, IoOp::Write);
             }
 
@@ -809,8 +804,8 @@ mod tests {
         let mut high = [0u8; 4];
         blk.mmio_read(REG_CONFIG_START, &mut low);
         blk.mmio_read(REG_CONFIG_START + 4, &mut high);
-        let capacity = u64::from(u32::from_le_bytes(low))
-            | (u64::from(u32::from_le_bytes(high)) << 32);
+        let capacity =
+            u64::from(u32::from_le_bytes(low)) | (u64::from(u32::from_le_bytes(high)) << 32);
         assert_eq!(capacity, DEFAULT_DISK_BYTES / SECTOR_SIZE);
     }
 

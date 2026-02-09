@@ -48,10 +48,7 @@ fn test_full_store_lifecycle() {
         let mut store = Store::open(&store_path, vmm_schema()).unwrap();
 
         let cpu = store
-            .register(
-                "vcpu_usage",
-                &[("vcpu".to_string(), "0".to_string())],
-            )
+            .register("vcpu_usage", &[("vcpu".to_string(), "0".to_string())])
             .unwrap();
 
         let mem = store
@@ -88,7 +85,12 @@ fn test_full_store_lifecycle() {
 
         // Query memory data in a sub-range
         let result = store
-            .query(mem_handle, 0, base_time + 10 * one_sec, base_time + 20 * one_sec)
+            .query(
+                mem_handle,
+                0,
+                base_time + 10 * one_sec,
+                base_time + 20 * one_sec,
+            )
             .unwrap();
         let mem_data: Vec<_> = result.collect_all();
         assert_eq!(mem_data.len(), 10);
@@ -166,12 +168,20 @@ fn test_nan_handling_in_queries() {
 
     // Write to series_a at seconds 1, 3, 5 (gaps at 2, 4)
     store.record(series_a, 10.0, base_time + one_sec).unwrap();
-    store.record(series_a, 30.0, base_time + 3 * one_sec).unwrap();
-    store.record(series_a, 50.0, base_time + 5 * one_sec).unwrap();
+    store
+        .record(series_a, 30.0, base_time + 3 * one_sec)
+        .unwrap();
+    store
+        .record(series_a, 50.0, base_time + 5 * one_sec)
+        .unwrap();
 
     // Write to series_b at seconds 2, 4 (different gaps)
-    store.record(series_b, 20.0, base_time + 2 * one_sec).unwrap();
-    store.record(series_b, 40.0, base_time + 4 * one_sec).unwrap();
+    store
+        .record(series_b, 20.0, base_time + 2 * one_sec)
+        .unwrap();
+    store
+        .record(series_b, 40.0, base_time + 4 * one_sec)
+        .unwrap();
 
     // Query series_a — should only get 3 points (NaN slots from series_b timestamps skipped)
     let result = store.query(series_a, 0, 0, u64::MAX).unwrap();
@@ -264,8 +274,12 @@ fn test_store_reopen_preserves_series() {
     // Create and register
     {
         let mut store = Store::open(&store_path, schemas.clone()).unwrap();
-        let handle = store.register("cpu", &[("host".to_string(), "a".to_string())]).unwrap();
-        store.record(handle, 42.0, 1_700_000_000_000_000_000).unwrap();
+        let handle = store
+            .register("cpu", &[("host".to_string(), "a".to_string())])
+            .unwrap();
+        store
+            .record(handle, 42.0, 1_700_000_000_000_000_000)
+            .unwrap();
     }
 
     // Reopen and verify the series still exists with data
@@ -276,7 +290,9 @@ fn test_store_reopen_preserves_series() {
         // Re-register same series — should return same handle
         // (need mutable for register, but data should be there from before)
         let mut store = store;
-        let handle = store.register("cpu", &[("host".to_string(), "a".to_string())]).unwrap();
+        let handle = store
+            .register("cpu", &[("host".to_string(), "a".to_string())])
+            .unwrap();
 
         let data: Vec<_> = store.query(handle, 0, 0, u64::MAX).unwrap().collect_all();
         assert_eq!(data.len(), 1);
