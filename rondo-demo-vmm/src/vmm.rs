@@ -41,6 +41,8 @@ pub struct VmmConfig {
     pub api_port: u16,
     /// Prometheus remote-write endpoint URL (optional).
     pub remote_write_endpoint: Option<String>,
+    /// Extra labels added to every remote-write time series.
+    pub external_labels: Vec<(String, String)>,
     /// Path to the virtio-blk backing file (optional).
     pub disk_path: Option<PathBuf>,
 }
@@ -104,6 +106,7 @@ pub struct Vmm {
     api_port: u16,
     metrics_store_path: PathBuf,
     remote_write_endpoint: Option<String>,
+    external_labels: Vec<(String, String)>,
     block_device: Option<VirtioBlock>,
 }
 
@@ -114,7 +117,9 @@ impl Vmm {
         // Append virtio-mmio device announcement to cmdline if a disk is configured.
         if config.disk_path.is_some() {
             config.cmdline.push(' ');
-            config.cmdline.push_str(crate::devices::block::CMDLINE_PARAM);
+            config
+                .cmdline
+                .push_str(crate::devices::block::CMDLINE_PARAM);
         }
 
         // 1. Open KVM
@@ -220,6 +225,7 @@ impl Vmm {
             api_port: config.api_port,
             metrics_store_path: config.metrics_store_path,
             remote_write_endpoint: config.remote_write_endpoint,
+            external_labels: config.external_labels,
             block_device,
         })
     }
@@ -253,13 +259,17 @@ impl Vmm {
             let export_metrics = self.metrics.clone();
             let cursor_path = self.metrics_store_path.join("cursor_prometheus.json");
             let endpoint = endpoint.clone();
+            let external_labels = self.external_labels.clone();
             std::thread::Builder::new()
                 .name("remote-write".into())
                 .spawn(move || {
-                    vcpu::export_loop(export_metrics, &endpoint, &cursor_path);
+                    vcpu::export_loop(export_metrics, &endpoint, &cursor_path, &external_labels);
                 })
                 .map_err(VmmError::Io)?;
-            tracing::info!("remote-write export thread started → {}", self.remote_write_endpoint.as_ref().unwrap());
+            tracing::info!(
+                "remote-write export thread started → {}",
+                self.remote_write_endpoint.as_ref().unwrap()
+            );
         }
 
         // Run vCPU loop in this thread (blocks)
@@ -305,8 +315,11 @@ impl Vmm {
         let cmdline_bytes = cmdline.as_bytes();
         mem.write(cmdline_bytes, GuestAddress(CMDLINE_ADDR))
             .map_err(|e| VmmError::Memory(format!("cmdline: {e}")))?;
-        mem.write(&[0u8], GuestAddress(CMDLINE_ADDR + cmdline_bytes.len() as u64))
-            .map_err(|e| VmmError::Memory(format!("cmdline null: {e}")))?;
+        mem.write(
+            &[0u8],
+            GuestAddress(CMDLINE_ADDR + cmdline_bytes.len() as u64),
+        )
+        .map_err(|e| VmmError::Memory(format!("cmdline null: {e}")))?;
 
         // SAFETY: boot_params is a repr(C) struct; zero-init is valid.
         let mut params: boot_params = unsafe { std::mem::zeroed() };

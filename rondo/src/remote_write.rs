@@ -27,8 +27,8 @@
 //! let config = RemoteWriteConfig::new("http://localhost:9090/api/v1/write");
 //! let mut cursor = ExportCursor::load_or_new("/tmp/cursor_prom.json")?;
 //!
-//! let exports = store.drain(&mut cursor, 0)?;
-//! push(&config, &exports, &store)?;
+//! let exports = store.drain(0, &mut cursor)?;
+//! push(&config, &exports, &store, &[])?;
 //! cursor.save()?;
 //! # Ok(())
 //! # }
@@ -145,6 +145,10 @@ impl RemoteWriteConfig {
 /// Converts drain output into the Prometheus remote-write protobuf format,
 /// compresses with snappy, and POSTs to the configured endpoint with retry logic.
 ///
+/// `external_labels` are merged into every time series' label set, allowing
+/// multiple VMM instances to be distinguished in Prometheus (e.g.,
+/// `instance=vmm_1`).
+///
 /// # Errors
 ///
 /// Returns `RemoteWriteError` if serialization fails, the server rejects the
@@ -153,12 +157,13 @@ pub fn push(
     config: &RemoteWriteConfig,
     exports: &[SeriesExport],
     store: &Store,
+    external_labels: &[(String, String)],
 ) -> Result<usize> {
     if exports.is_empty() {
         return Ok(0);
     }
 
-    let request = build_write_request(exports, store)?;
+    let request = build_write_request(exports, store, external_labels)?;
     let proto_bytes = serialize_write_request(&request)?;
     let compressed = compress_snappy(&proto_bytes)?;
     send_with_retry(config, &compressed)?;
@@ -171,12 +176,18 @@ pub fn push(
 /// Returns the snappy-compressed protobuf bytes suitable for HTTP POST.
 /// This is useful for testing or custom transport implementations.
 ///
+/// `external_labels` are merged into every time series' label set.
+///
 /// # Errors
 ///
 /// Returns an error if a series handle cannot be found in the store,
 /// or if serialization/compression fails.
-pub fn encode(exports: &[SeriesExport], store: &Store) -> Result<Vec<u8>> {
-    let request = build_write_request(exports, store)?;
+pub fn encode(
+    exports: &[SeriesExport],
+    store: &Store,
+    external_labels: &[(String, String)],
+) -> Result<Vec<u8>> {
+    let request = build_write_request(exports, store, external_labels)?;
     let proto_bytes = serialize_write_request(&request)?;
     compress_snappy(&proto_bytes)
 }
@@ -185,19 +196,21 @@ pub fn encode(exports: &[SeriesExport], store: &Store) -> Result<Vec<u8>> {
 fn build_write_request(
     exports: &[SeriesExport],
     store: &Store,
+    external_labels: &[(String, String)],
 ) -> Result<proto::WriteRequest> {
     let mut timeseries = Vec::with_capacity(exports.len());
 
     for export in exports {
-        let (name, labels) = store.series_info(&export.handle).ok_or_else(|| {
-            RemoteWriteError::SeriesNotFound {
-                schema_index: export.handle.schema_index,
-                column: export.handle.column,
-            }
-        })?;
+        let (name, labels) =
+            store
+                .series_info(&export.handle)
+                .ok_or_else(|| RemoteWriteError::SeriesNotFound {
+                    schema_index: export.handle.schema_index,
+                    column: export.handle.column,
+                })?;
 
         let ts = proto::TimeSeries {
-            labels: build_labels(name, labels),
+            labels: build_labels(name, labels, external_labels),
             samples: build_samples(&export.points),
         };
 
@@ -207,12 +220,16 @@ fn build_write_request(
     Ok(proto::WriteRequest { timeseries })
 }
 
-/// Builds Prometheus labels from series name and labels.
+/// Builds Prometheus labels from series name, series labels, and external labels.
 ///
-/// Adds the required `__name__` label and sorts labels alphabetically
-/// as required by the Prometheus spec.
-fn build_labels(name: &str, labels: &[(String, String)]) -> Vec<proto::Label> {
-    let mut result = Vec::with_capacity(labels.len() + 1);
+/// Adds the required `__name__` label, merges in any external labels, and
+/// sorts the result alphabetically as required by the Prometheus spec.
+fn build_labels(
+    name: &str,
+    labels: &[(String, String)],
+    external_labels: &[(String, String)],
+) -> Vec<proto::Label> {
+    let mut result = Vec::with_capacity(labels.len() + external_labels.len() + 1);
 
     result.push(proto::Label {
         name: "__name__".to_string(),
@@ -220,6 +237,13 @@ fn build_labels(name: &str, labels: &[(String, String)]) -> Vec<proto::Label> {
     });
 
     for (key, value) in labels {
+        result.push(proto::Label {
+            name: key.clone(),
+            value: value.clone(),
+        });
+    }
+
+    for (key, value) in external_labels {
         result.push(proto::Label {
             name: key.clone(),
             value: value.clone(),
@@ -249,7 +273,9 @@ fn build_samples(points: &[(u64, f64)]) -> Vec<proto::Sample> {
 /// Serializes a `WriteRequest` to protobuf bytes.
 fn serialize_write_request(request: &proto::WriteRequest) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(request.encoded_len());
-    request.encode(&mut buf).map_err(|e| RemoteWriteError::Serialization { source: e })?;
+    request
+        .encode(&mut buf)
+        .map_err(|e| RemoteWriteError::Serialization { source: e })?;
     Ok(buf)
 }
 
@@ -314,12 +340,9 @@ mod tests {
         let schemas = vec![SchemaConfig {
             name: "test".to_string(),
             label_matcher: LabelMatcher::any(),
-            tiers: vec![TierConfig::new(
-                Duration::from_secs(1),
-                Duration::from_secs(60),
-                None,
-            )
-            .unwrap()],
+            tiers: vec![
+                TierConfig::new(Duration::from_secs(1), Duration::from_secs(60), None).unwrap(),
+            ],
             max_series: 10,
         }];
         Store::open(&store_dir, schemas).unwrap()
@@ -332,7 +355,7 @@ mod tests {
             ("dc".to_string(), "us-east".to_string()),
         ];
 
-        let result = build_labels("cpu_usage", &labels);
+        let result = build_labels("cpu_usage", &labels, &[]);
 
         // Should be sorted alphabetically
         assert_eq!(result.len(), 3);
@@ -342,6 +365,23 @@ mod tests {
         assert_eq!(result[1].value, "us-east");
         assert_eq!(result[2].name, "host");
         assert_eq!(result[2].value, "web1");
+    }
+
+    #[test]
+    fn test_build_labels_with_external() {
+        let labels = vec![("host".to_string(), "web1".to_string())];
+        let external = vec![("instance".to_string(), "vmm_1".to_string())];
+
+        let result = build_labels("cpu_usage", &labels, &external);
+
+        // Should be sorted: __name__, host, instance
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].name, "__name__");
+        assert_eq!(result[0].value, "cpu_usage");
+        assert_eq!(result[1].name, "host");
+        assert_eq!(result[1].value, "web1");
+        assert_eq!(result[2].name, "instance");
+        assert_eq!(result[2].value, "vmm_1");
     }
 
     #[test]
@@ -366,7 +406,7 @@ mod tests {
         let store = create_test_store(dir.path());
 
         let exports: Vec<SeriesExport> = Vec::new();
-        let request = build_write_request(&exports, &store).unwrap();
+        let request = build_write_request(&exports, &store, &[]).unwrap();
 
         assert!(request.timeseries.is_empty());
     }
@@ -388,7 +428,7 @@ mod tests {
             ],
         }];
 
-        let request = build_write_request(&exports, &store).unwrap();
+        let request = build_write_request(&exports, &store, &[]).unwrap();
 
         assert_eq!(request.timeseries.len(), 1);
         let ts = &request.timeseries[0];
@@ -445,7 +485,7 @@ mod tests {
             points: vec![(1_700_000_000_000_000_000, 99.9)],
         }];
 
-        let bytes = encode(&exports, &store).unwrap();
+        let bytes = encode(&exports, &store, &[]).unwrap();
         assert!(!bytes.is_empty());
 
         // Verify decompression and decoding
@@ -464,7 +504,7 @@ mod tests {
         let store = create_test_store(dir.path());
 
         // Should succeed immediately with 0 count, no HTTP call
-        let count = push(&config, &[], &store).unwrap();
+        let count = push(&config, &[], &store, &[]).unwrap();
         assert_eq!(count, 0);
     }
 
@@ -500,7 +540,7 @@ mod tests {
             points: vec![(1_000_000_000_000_000_000, 1.0)],
         }];
 
-        let result = build_write_request(&exports, &store);
+        let result = build_write_request(&exports, &store, &[]);
         assert!(result.is_err());
     }
 }

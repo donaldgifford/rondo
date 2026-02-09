@@ -24,7 +24,8 @@ VMM_REMOTE_WRITE := https://prometheus.fartlab.dev/api/v1/write
         vmm-sync vmm-build vmm-test vmm-clippy vmm-run vmm-bench vmm-shell \
         vmm-demo vmm-demo-disk vmm-demo-query vmm-demo-remote-write \
         vmm-bench-15 vmm-bench-30 vmm-bench-45 \
-        vmm-bench-capture vmm-bench-scale clean
+        vmm-bench-capture vmm-bench-scale \
+        vmm-bench-scale-remote-write clean
 
 # ─── Local (macOS) ─────────────────────────────────────────────────────
 
@@ -179,6 +180,18 @@ vmm-bench-scale: vmm-sync vmm-build-release ## Run scale benchmark (10/50/100 VM
 			--duration 15 \
 			--kernel $(VMM_DIR)/$(VMM_KERNEL) \
 			--initramfs $(VMM_DIR)/$(VMM_INITRAMFS)"
+
+# ─── Scale Benchmark with Remote-Write ────────────────────────────────
+
+vmm-bench-scale-remote-write: vmm-sync vmm-build-release ## Run scale benchmark with Prometheus remote-write
+	ssh $(VMM_HOST) "$(VMM_CARGO) && \
+		cd rondo-demo-vmm/guest && ./build.sh && cd $(VMM_DIR) && \
+		./scripts/benchmark_scale.sh \
+			--counts '10 50 100' \
+			--duration 15 \
+			--kernel $(VMM_DIR)/$(VMM_KERNEL) \
+			--initramfs $(VMM_DIR)/$(VMM_INITRAMFS) \
+			--remote-write $(VMM_REMOTE_WRITE)"
 
 # ─── Cleanup ──────────────────────────────────────────────────────────
 

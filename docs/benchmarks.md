@@ -102,6 +102,16 @@ Peak RSS includes KVM guest memory pages faulted in by the hypervisor (128 MiB a
 
 Run with: `make vmm-bench-scale`
 
+## Scale Benchmark with Remote-Write
+
+The scale benchmark can push metrics to Prometheus via remote-write, making results visible in the Grafana scale dashboard (`Rondo Scale Benchmark`). Each VMM instance gets an `--external-labels instance=vmm_N` flag so all series are distinguishable.
+
+```bash
+make vmm-bench-scale-remote-write
+```
+
+This runs 10/50/100 concurrent VMMs with `--remote-write` pointed at the external Prometheus. The Grafana dashboard shows per-instance uptime, RSS, FDs, and aggregate vCPU exit patterns.
+
 ## Criterion Microbenchmarks
 
 Detailed criterion benchmarks for the `record()` hot path:

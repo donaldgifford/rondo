@@ -11,7 +11,7 @@
 #   - rondo-demo-vmm built in release mode (cargo build -p rondo-demo-vmm --release)
 #
 # Usage:
-#   ./benchmark_scale.sh [--counts "10 50 100"] [--duration 15] [--kernel PATH] [--initramfs PATH]
+#   ./benchmark_scale.sh [--counts "10 50 100"] [--duration 15] [--kernel PATH] [--initramfs PATH] [--remote-write URL]
 
 set -euo pipefail
 
@@ -25,6 +25,7 @@ WORKLOAD_DURATION="${DURATION:-15}"
 KERNEL="${KERNEL:-${PROJECT_DIR}/rondo-demo-vmm/guest/out/bzImage}"
 INITRAMFS="${INITRAMFS:-${PROJECT_DIR}/rondo-demo-vmm/guest/out/initramfs.cpio}"
 VMM_BINARY="${VMM_BINARY:-${PROJECT_DIR}/target/release/rondo-demo-vmm}"
+REMOTE_WRITE_URL=""
 BASE_PORT=9200
 BASE_DIR="/tmp/rondo_bench_scale"
 CMDLINE_BASE="console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 noapic notsc clocksource=jiffies lpj=1000000 rdinit=/init"
@@ -58,8 +59,12 @@ while [[ $# -gt 0 ]]; do
 		VMM_BINARY="$2"
 		shift 2
 		;;
+	--remote-write)
+		REMOTE_WRITE_URL="$2"
+		shift 2
+		;;
 	--help | -h)
-		echo "Usage: $0 [--counts '10 50 100'] [--duration 15] [--kernel PATH] [--initramfs PATH]"
+		echo "Usage: $0 [--counts '10 50 100'] [--duration 15] [--kernel PATH] [--initramfs PATH] [--remote-write URL]"
 		exit 0
 		;;
 	*)
@@ -124,12 +129,13 @@ preflight() {
 	fi
 
 	echo "Pre-flight OK"
-	echo "  kernel:    $KERNEL"
-	echo "  initramfs: $INITRAMFS"
-	echo "  binary:    $VMM_BINARY"
-	echo "  workload:  ${WORKLOAD_DURATION}s"
-	echo "  counts:    $COUNTS"
-	echo "  ulimit -n: $(ulimit -n)"
+	echo "  kernel:       $KERNEL"
+	echo "  initramfs:    $INITRAMFS"
+	echo "  binary:       $VMM_BINARY"
+	echo "  workload:     ${WORKLOAD_DURATION}s"
+	echo "  counts:       $COUNTS"
+	echo "  remote-write: ${REMOTE_WRITE_URL:-disabled}"
+	echo "  ulimit -n:    $(ulimit -n)"
 	echo ""
 }
 
@@ -202,12 +208,18 @@ launch_vmms() {
 		local store_dir="$run_dir/stores/vmm_${i}"
 		local log_file="$run_dir/logs/vmm_${i}.log"
 
+		local rw_args=()
+		if [[ -n "$REMOTE_WRITE_URL" ]]; then
+			rw_args=(--remote-write "$REMOTE_WRITE_URL" --external-labels "instance=vmm_${i}")
+		fi
+
 		"$VMM_BINARY" \
 			--kernel "$KERNEL" \
 			--initramfs "$INITRAMFS" \
 			--metrics-store "$store_dir" \
 			--api-port "$port" \
 			--cmdline "$CMDLINE_BASE workload_duration=$WORKLOAD_DURATION" \
+			"${rw_args[@]}" \
 			>"$log_file" 2>&1 &
 
 		ALL_VMM_PIDS+=("$!")

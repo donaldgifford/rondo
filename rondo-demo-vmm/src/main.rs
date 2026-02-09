@@ -10,13 +10,13 @@
 mod metrics;
 
 #[cfg(target_os = "linux")]
-mod vmm;
-#[cfg(target_os = "linux")]
-mod vcpu;
+mod api;
 #[cfg(target_os = "linux")]
 mod devices;
 #[cfg(target_os = "linux")]
-mod api;
+mod vcpu;
+#[cfg(target_os = "linux")]
+mod vmm;
 
 use std::path::PathBuf;
 
@@ -39,7 +39,10 @@ struct Cli {
     metrics_store: PathBuf,
 
     /// Kernel command line arguments.
-    #[arg(long, default_value = "console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 noapic notsc clocksource=jiffies lpj=1000000 rdinit=/init")]
+    #[arg(
+        long,
+        default_value = "console=ttyS0 earlyprintk=ttyS0 reboot=k panic=1 noapic notsc clocksource=jiffies lpj=1000000 rdinit=/init"
+    )]
     cmdline: String,
 
     /// Guest memory size in MiB.
@@ -54,6 +57,11 @@ struct Cli {
     /// When set, the VMM periodically pushes metrics to this endpoint.
     #[arg(long)]
     remote_write: Option<String>,
+
+    /// Extra labels added to every remote-write time series (format: key=value,key=value,...).
+    /// Useful for distinguishing multiple VMM instances in Prometheus.
+    #[arg(long)]
+    external_labels: Option<String>,
 
     /// Path to a backing file for the virtio-blk device.
     /// If the file does not exist, it is created at 64 MiB.
@@ -86,6 +94,12 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 fn run_vmm(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    let external_labels = cli
+        .external_labels
+        .as_deref()
+        .map(parse_external_labels)
+        .unwrap_or_default();
+
     let config = vmm::VmmConfig {
         kernel_path: cli.kernel,
         initramfs_path: cli.initramfs,
@@ -94,6 +108,7 @@ fn run_vmm(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         metrics_store_path: cli.metrics_store,
         api_port: cli.api_port,
         remote_write_endpoint: cli.remote_write,
+        external_labels,
         disk_path: cli.disk,
     };
 
@@ -102,4 +117,16 @@ fn run_vmm(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("VMM exited cleanly");
     Ok(())
+}
+
+/// Parses `key=value,key=value,...` into a vec of label pairs.
+#[cfg(target_os = "linux")]
+fn parse_external_labels(s: &str) -> Vec<(String, String)> {
+    s.split(',')
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| {
+            let (k, v) = part.split_once('=')?;
+            Some((k.to_string(), v.to_string()))
+        })
+        .collect()
 }

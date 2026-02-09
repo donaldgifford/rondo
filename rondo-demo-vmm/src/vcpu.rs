@@ -8,7 +8,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use kvm_bindings::{kvm_dtable, kvm_regs, kvm_segment, KVM_MAX_CPUID_ENTRIES};
+use kvm_bindings::{KVM_MAX_CPUID_ENTRIES, kvm_dtable, kvm_regs, kvm_segment};
 use kvm_ioctls::{Kvm, VcpuExit, VcpuFd, VmFd};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 
@@ -124,7 +124,7 @@ pub fn setup_sregs(vcpu: &VcpuFd) -> Result<(), VmmError> {
         type_: 11, // Execute/Read, Accessed
         present: 1,
         dpl: 0,
-        db: 0,  // must be 0 in 64-bit mode
+        db: 0, // must be 0 in 64-bit mode
         s: 1,
         l: 1, // 64-bit
         g: 1,
@@ -213,12 +213,21 @@ fn setup_vcpu_timer() {
     // SAFETY: setting a simple signal handler + timer.
     unsafe {
         // Install a no-op SIGALRM handler (just needs to interrupt KVM_RUN)
-        libc::signal(libc::SIGALRM, noop_handler as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGALRM,
+            noop_handler as *const () as libc::sighandler_t,
+        );
 
         // Fire SIGALRM every 1 second
         let timer = libc::itimerval {
-            it_interval: libc::timeval { tv_sec: 1, tv_usec: 0 },
-            it_value: libc::timeval { tv_sec: 1, tv_usec: 0 },
+            it_interval: libc::timeval {
+                tv_sec: 1,
+                tv_usec: 0,
+            },
+            it_value: libc::timeval {
+                tv_sec: 1,
+                tv_usec: 0,
+            },
         };
         libc::setitimer(libc::ITIMER_REAL, &timer, std::ptr::null_mut());
     }
@@ -279,9 +288,7 @@ pub fn run_vcpu_loop(
                     let elapsed = boot_start.elapsed().as_secs_f64();
                     #[allow(clippy::cast_precision_loss)]
                     let rate = exit_count as f64 / elapsed;
-                    tracing::debug!(
-                        "exit #{exit_count} at {elapsed:.1}s ({rate:.0} exits/s)",
-                    );
+                    tracing::debug!("exit #{exit_count} at {elapsed:.1}s ({rate:.0} exits/s)",);
                 }
 
                 let reason = match exit {
@@ -380,12 +387,7 @@ pub fn run_vcpu_loop(
 }
 
 /// Records a single vCPU exit metric (best-effort, never panics).
-fn record_exit(
-    metrics: &Arc<Mutex<VmMetrics>>,
-    reason: VcpuExitReason,
-    exit_ns: f64,
-    run_ns: f64,
-) {
+fn record_exit(metrics: &Arc<Mutex<VmMetrics>>, reason: VcpuExitReason, exit_ns: f64, run_ns: f64) {
     if let Ok(mut m) = metrics.lock() {
         let ts = timestamp_ns();
         let _ = m.record_vcpu_exit(reason, exit_ns, run_ns, ts);
@@ -393,10 +395,7 @@ fn record_exit(
 }
 
 /// Records a completed block I/O operation as metrics (best-effort, never panics).
-fn record_blk_io(
-    metrics: &Arc<Mutex<VmMetrics>>,
-    io: &block::CompletedIo,
-) {
+fn record_blk_io(metrics: &Arc<Mutex<VmMetrics>>, io: &block::CompletedIo) {
     if let Ok(mut m) = metrics.lock() {
         let ts = timestamp_ns();
         let op = match io.op {
@@ -461,9 +460,10 @@ pub fn export_loop(
     metrics: Arc<Mutex<VmMetrics>>,
     endpoint: &str,
     cursor_path: &std::path::Path,
+    external_labels: &[(String, String)],
 ) {
     use rondo::export::ExportCursor;
-    use rondo::remote_write::{push, RemoteWriteConfig};
+    use rondo::remote_write::{RemoteWriteConfig, push};
 
     let config = RemoteWriteConfig::new(endpoint);
 
@@ -490,7 +490,7 @@ pub fn export_loop(
                 }
                 Ok(exports) => {
                     let count = exports.len();
-                    match push(&config, &exports, store) {
+                    match push(&config, &exports, store, external_labels) {
                         Ok(n) => {
                             tracing::info!("remote-write: pushed {n} series ({count} with data)");
                             Ok(())

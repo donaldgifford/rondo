@@ -105,8 +105,33 @@ Store disk: consistent 1.1 MB per VM. Zero extra processes for monitoring.
 - `docs/IMPLEMENTATION.md` — scale benchmark notes + reference this doc
 - `CLAUDE.md` — new targets + Prometheus/Grafana note
 
+### 6. Scale benchmark with remote-write + external labels ✅
+
+Enables the scale benchmark to push metrics to the external Prometheus so results are visible in Grafana.
+
+**Problem solved:** Without instance labels, 100 VMMs pushing the same metric names collide in Prometheus. Added `--external-labels` to the VMM CLI so each instance gets a unique `instance=vmm_N` label.
+
+**Rust changes:**
+- `rondo/src/remote_write.rs` — `push()`, `build_write_request()`, `encode()`, `build_labels()` all accept `external_labels: &[(String, String)]` parameter
+- `rondo-demo-vmm/src/main.rs` — `--external-labels key=value,key=value` CLI arg, parsed and threaded through
+- `rondo-demo-vmm/src/vmm.rs` — `external_labels` field on `VmmConfig` and `Vmm`, passed to export thread
+- `rondo-demo-vmm/src/vcpu.rs` — `export_loop()` accepts and forwards external labels to `push()`
+
+**Benchmark script changes:**
+- `scripts/benchmark_scale.sh` — new `--remote-write URL` flag; when set, appends `--remote-write` and `--external-labels instance=vmm_$i` to each VMM launch
+
+**Grafana scale dashboard:**
+- `deploy/grafana/rondo-scale-dashboard.json` — 7 panels: Active VMs (stat), Total RSS (stat), Total FDs (stat), Uptime by Instance, RSS by Instance, vCPU Exits aggregate, Avg Exit Duration
+- `deploy/k8s/grafana-scale-dashboard.yaml` — GrafanaDashboard CR
+- `deploy/k8s/rondo-scale-dashboard-configmap.yaml` — ConfigMap wrapping the JSON
+
+**Make target:**
+- `make vmm-bench-scale-remote-write` — scale benchmark with remote-write to Prometheus
+
 ## Verification ✅
 1. `make vmm-demo` — shows data points in post-run query ✅
 2. `make vmm-bench-45` — guest runs 45s workload, store captures 26 data points ✅
 3. `rondo-cli query vmm_metrics 'vcpu_exits_total{reason=io}' --range all` — returns recorded points ✅
 4. `make vmm-clippy` and `make vmm-test` — all clean (138 tests pass) ✅
+5. `cargo nextest run --workspace` — 139 tests pass (includes new external labels test) ✅
+6. `cargo clippy --workspace --all-targets -- -D warnings` — no warnings ✅
