@@ -6,7 +6,7 @@ members = ["rondo", "rondo-cli", "rondo-demo-vmm"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/donaldgifford/rondo"
-rust-version = "1.92"
+rust-version = "1.93"
 
 [workspace.lints.clippy]
 # Correctness

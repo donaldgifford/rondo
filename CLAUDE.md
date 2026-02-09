@@ -69,7 +69,7 @@ The storage engine is built around these core abstractions (see `docs/MVP.md` fo
 
 ## Coding Standards
 
-- **Edition**: Rust 2024, MSRV 1.92
+- **Edition**: Rust 2024, MSRV 1.93
 - **Line width**: 100 characters (rustfmt.toml)
 - **Unsafe**: All unsafe blocks must have `// SAFETY:` comments (`undocumented_unsafe_blocks = "deny"`). Unsafe ops in unsafe fns are denied.
 - **Docs**: `missing_docs` is warned — all public items need doc comments
